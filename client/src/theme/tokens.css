@@ -1,0 +1,46 @@
+:root {
+  --parchment: #e9dcc0;
+  --parchment-light: #f4ead2;
+  --ink: #2e2418;
+  --border: #4a3a28;
+  --wax-red: #7a2e1e;
+  --status-adventuring: #c9822e;
+  --status-done: #4f6b3a;
+  --font-body: "Kaiti TC", "STKaiti", "Songti TC", serif;
+  --font-heading: "Kaiti TC", "STKaiti", "Songti TC", serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--parchment);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+h1, h2, h3, h4 { font-family: var(--font-heading); margin: 0; }
+
+code, pre, kbd { font-family: var(--font-mono); }
+
+.frame {
+  background: var(--parchment-light);
+  border: 2px solid var(--border);
+  border-radius: 4px;
+}
+
+.banner {
+  padding: 8px 16px;
+  border-bottom: 2px solid var(--border);
+  background: var(--parchment-light);
+}
+
+.banner-warn {
+  background: var(--wax-red);
+  color: var(--parchment-light);
+}
