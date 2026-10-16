@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { repos as makeRepos, type Repos } from '../store/jsonRepo.js';
+import { sdkEnv } from '../preflight.js';
 import { ensureSeedNpcs, seedNpcs } from '../npcs/seeds.js';
 import { CLASS_TEMPLATES, GIT_PUSH_DENY, MODELS, READ_ONLY_DENY, buildAgentOptions, connectorPrefixesFrom } from './options.js';
 
@@ -76,6 +77,39 @@ describe('buildAgentOptions', () => {
   it('accepts full claude.ai style prefixes without double wrapping', () => {
     const o = build({ allConnectorPrefixes: ['mcp__claude_ai_Slack__'] });
     expect(o.disallowedTools).toContain('mcp__claude_ai_Slack__*');
+  });
+
+  it('treats bare and full prefix spellings as the same connector', () => {
+    const equipped = npc({ equipment: { readOnly: false, connectorPrefixes: ['slack', 'mcp__jira__'] } });
+    const o = build({ npc: equipped, allConnectorPrefixes: ['mcp__slack__', 'jira', 'github'] });
+    expect(o.disallowedTools).toContain('mcp__github__*');
+    expect(o.disallowedTools).not.toContain('mcp__slack__*');
+    expect(o.disallowedTools).not.toContain('mcp__jira__*');
+  });
+
+  it('exempts the builtin clerk from connector denies but keeps read-only and push denies', () => {
+    const all = ['claude_ai_Atlassian', 'claude_ai_GitHub', 'claude_ai_Slack'];
+    const clerk = seedNpcs().find((n) => n.builtin === 'clerk')!;
+    const c = build({ npc: clerk, allConnectorPrefixes: all });
+    expect(c.disallowedTools?.some((t) => t.startsWith('mcp__'))).toBe(false);
+    expect(c.disallowedTools).toEqual(expect.arrayContaining([...READ_ONLY_DENY, ...GIT_PUSH_DENY]));
+    const other = build({ allConnectorPrefixes: all });
+    expect(other.disallowedTools).toEqual(expect.arrayContaining(all.map((p) => `mcp__${p}__*`)));
+  });
+
+  it('passes the given env through unchanged (no API key from sdkEnv)', () => {
+    const { env } = sdkEnv({ ANTHROPIC_API_KEY: 'x', PATH: '/bin' });
+    const o = build({ env });
+    expect(o.env).toBe(env);
+    expect(o.env).not.toHaveProperty('ANTHROPIC_API_KEY');
+    expect(o.env?.PATH).toBe('/bin');
+  });
+
+  it('does not share the deny arrays with the exported constants', () => {
+    const o = build({ forceReadOnly: true });
+    o.disallowedTools?.push('x');
+    expect(GIT_PUSH_DENY).toHaveLength(2);
+    expect(READ_ONLY_DENY).toHaveLength(3);
   });
 
   it('adds no connector rules when no inventory exists', () => {

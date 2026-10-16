@@ -11,10 +11,10 @@ export const CLASS_TEMPLATES: Record<ClassId, Pick<Npc, 'model' | 'effort' | 'eq
   freeman: { model: MODELS.sonnet, effort: 'medium', equipment: { connectorPrefixes: [], readOnly: false } },
 };
 
-export const READ_ONLY_DENY = ['Edit', 'Write', 'NotebookEdit'];
+export const READ_ONLY_DENY = ['Edit', 'Write', 'NotebookEdit'] as const;
 
 /** Pushing and opening PRs is done by the game at settlement, never by an NPC (spike: auto mode allows push). */
-export const GIT_PUSH_DENY = ['Bash(git push *)', 'Bash(git push)'];
+export const GIT_PUSH_DENY = ['Bash(git push *)', 'Bash(git push)'] as const;
 
 /** Connector prefixes found by the last inventory; `[]` before one exists (then no connector is denied). */
 export function connectorPrefixesFrom(settings: Settings): string[] {
@@ -22,12 +22,16 @@ export function connectorPrefixesFrom(settings: Settings): string[] {
 }
 
 /**
- * Deny rule hiding one connector's tools. Accepts a bare prefix (`slack` -> `mcp__slack__*`) or the
- * full tool prefix the inventory stores (`mcp__claude_ai_Slack__` -> `mcp__claude_ai_Slack__*`).
+ * The one place prefix spelling is normalized: `slack`, `mcp__slack__` and `mcp__slack` all become
+ * `slack` (the inventory stores the full `mcp__claude_ai_Slack__` form; equipment may use either).
  */
+export function normalizeConnectorPrefix(prefix: string): string {
+  return prefix.replace(/^mcp__/, '').replace(/__$/, '');
+}
+
+/** Deny rule hiding one connector's tools, e.g. `slack` or `mcp__slack__` -> `mcp__slack__*`. */
 export function connectorDenyRule(prefix: string): string {
-  if (prefix.startsWith('mcp__')) return prefix.endsWith('__') ? `${prefix}*` : `${prefix}__*`;
-  return `mcp__${prefix}__*`;
+  return `mcp__${normalizeConnectorPrefix(prefix)}__*`;
 }
 
 export interface BuildAgentOptionsInput {
@@ -47,12 +51,13 @@ export interface BuildAgentOptionsInput {
 export function buildAgentOptions(input: BuildAgentOptionsInput): Options {
   const { npc, appendPrompt } = input;
   const readOnly = npc.equipment.readOnly || input.forceReadOnly === true;
-  const equipped = new Set(npc.equipment.connectorPrefixes);
-  const disallowedTools = [
-    ...GIT_PUSH_DENY,
-    ...(readOnly ? READ_ONLY_DENY : []),
-    ...input.allConnectorPrefixes.filter((p) => !equipped.has(p)).map(connectorDenyRule),
-  ];
+  // The built-in clerk keeps every claude.ai connector (Jira/GitHub paperwork); it stays read-only.
+  const equipped = new Set(npc.equipment.connectorPrefixes.map(normalizeConnectorPrefix));
+  const connectorDenies =
+    npc.builtin === 'clerk'
+      ? []
+      : input.allConnectorPrefixes.filter((p) => !equipped.has(normalizeConnectorPrefix(p))).map(connectorDenyRule);
+  const disallowedTools: string[] = [...GIT_PUSH_DENY, ...(readOnly ? READ_ONLY_DENY : []), ...connectorDenies];
   const options: Options = {
     systemPrompt: { type: 'preset', preset: 'claude_code', append: appendPrompt ? `${npc.persona}\n\n${appendPrompt}` : npc.persona },
     model: npc.model,
