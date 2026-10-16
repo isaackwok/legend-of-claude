@@ -159,6 +159,25 @@ export function SettlementDialog({ questId }: { questId: string }) {
               <a href={ticketUrl} target="_blank" rel="noopener noreferrer">開啟 Jira 票</a>
             </p>
           )}
+          {(record.branch || record.worktreePath) && (
+            <dl className="settle-place">
+              {record.branch && (
+                <>
+                  <dt>分支</dt>
+                  <dd><code>{record.branch}</code></dd>
+                </>
+              )}
+              {record.worktreePath && (
+                <>
+                  <dt>工作目錄</dt>
+                  <dd><code>{record.worktreePath}</code></dd>
+                </>
+              )}
+            </dl>
+          )}
+          {record.accepted === false && (
+            <p role="status" className="form-error">委託仍在待驗收，可修正後重新結算</p>
+          )}
           <div className="form-actions">
             <button type="button" className="primary" onClick={close}>關閉</button>
           </div>

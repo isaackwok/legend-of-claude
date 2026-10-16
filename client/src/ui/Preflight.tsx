@@ -1,8 +1,10 @@
-import type { Preflight as PreflightInfo } from '@loc/shared';
+import { NOT_LOGGED_IN_WARNING, type Preflight as PreflightInfo } from '@loc/shared';
 
 export function Preflight({ preflight }: { preflight: PreflightInfo | null }) {
   if (!preflight) return null;
-  const { ignoredEnvVars, loggedIn, warnings } = preflight;
+  const { ignoredEnvVars, loggedIn } = preflight;
+  // The not-logged-in banner below already says it; don't repeat the server's warning text.
+  const warnings = [...new Set(preflight.warnings)].filter((w) => loggedIn || w !== NOT_LOGGED_IN_WARNING);
   if (loggedIn && ignoredEnvVars.length === 0 && warnings.length === 0) return null;
   return (
     <div>

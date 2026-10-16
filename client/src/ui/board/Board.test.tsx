@@ -202,6 +202,31 @@ describe('StartQuestDialog', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it('for a quest with a worktree, preselects its NPC and locks its dungeon', async () => {
+    seed();
+    const resumed = quest({ id: 'q', status: 'open', npcId: 'b', dungeonId: 'd1', worktreePath: '/data/worktrees/loc-q' });
+    const fetchFn = mockFetch(() => ({ body: { ...resumed, status: 'adventuring' } }));
+    render(<StartQuestDialog quest={resumed} onClose={() => undefined} />);
+    expect((screen.getByLabelText('冒險者') as HTMLSelectElement).value).toBe('b');
+    const dungeonSelect = screen.getByLabelText('地下城') as HTMLSelectElement;
+    // Not b's home dungeon d2: the quest's own dungeon, and it cannot be changed.
+    expect(dungeonSelect.value).toBe('d1');
+    expect(dungeonSelect.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('冒險者'), { target: { value: 'a' } });
+    expect(dungeonSelect.value).toBe('d1');
+    fireEvent.click(screen.getByRole('button', { name: '出發' }));
+    await waitFor(() => expect(fetchFn).toHaveBeenCalled());
+    expect(JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body))).toEqual({ npcId: 'a', dungeonId: 'd1' });
+  });
+
+  it('falls back to the first free NPC when the quest NPC is busy', () => {
+    seed();
+    const resumed = quest({ id: 'q', status: 'open', npcId: 'busy', dungeonId: 'd2', worktreePath: '/w' });
+    render(<StartQuestDialog quest={resumed} onClose={() => undefined} />);
+    expect((screen.getByLabelText('冒險者') as HTMLSelectElement).value).toBe('a');
+    expect((screen.getByLabelText('地下城') as HTMLSelectElement).value).toBe('d2');
+  });
+
   it('clicking 派遣 on an open card opens the dialog', () => {
     seed();
     useGame.setState({ quests: { q: open } });

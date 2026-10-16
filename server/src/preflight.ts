@@ -1,11 +1,11 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Preflight } from '@loc/shared';
+import { NOT_LOGGED_IN_WARNING, type Preflight } from '@loc/shared';
 import type { QueryFn } from './agent/queryFn.js';
 
 const STRIPPED_ENV_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'] as const;
 
-export const NOT_LOGGED_IN_WARNING = '請先在終端機執行 claude 並用 claude.ai 帳號登入';
+export { NOT_LOGGED_IN_WARNING };
 
 /** Env for SDK child processes: a copy of `env` without API-key variables, so the claude.ai login is used. */
 export function sdkEnv(env: NodeJS.ProcessEnv = process.env): { env: Record<string, string | undefined>; ignored: string[] } {

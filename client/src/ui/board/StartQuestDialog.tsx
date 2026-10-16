@@ -22,13 +22,18 @@ export function StartQuestDialog({ quest, onClose }: StartQuestDialogProps) {
   const defaultDungeon = (npc: Npc | undefined) =>
     npc?.homeDungeonId && dungeonMap[npc.homeDungeonId] ? npc.homeDungeonId : (dungeons[0]?.id ?? '');
 
-  const [npcId, setNpcId] = useState(npcs[0]?.id ?? '');
-  const [dungeonId, setDungeonId] = useState(() => defaultDungeon(npcs[0]));
+  // A quest that already has a worktree continues there: its NPC is preselected (if free) and its
+  // dungeon is locked, since the server refuses another dungeon for an existing worktree.
+  const lockedDungeon = quest.worktreePath && quest.dungeonId && dungeonMap[quest.dungeonId] ? quest.dungeonId : undefined;
+  const firstNpc = (quest.worktreePath && npcs.find((n) => n.id === quest.npcId)) || npcs[0];
+  const [npcId, setNpcId] = useState(firstNpc?.id ?? '');
+  const [dungeonId, setDungeonId] = useState(() => lockedDungeon ?? defaultDungeon(firstNpc));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
   const chooseNpc = (id: string) => {
     setNpcId(id);
+    if (lockedDungeon) return;
     const npc = npcs.find((n) => n.id === id);
     if (npc?.homeDungeonId && dungeonMap[npc.homeDungeonId]) setDungeonId(npc.homeDungeonId);
   };
@@ -67,7 +72,7 @@ export function StartQuestDialog({ quest, onClose }: StartQuestDialogProps) {
         </label>
         <label>
           地下城
-          <select value={dungeonId} onChange={(e) => setDungeonId(e.target.value)} disabled={busy || dungeons.length === 0}>
+          <select value={dungeonId} onChange={(e) => setDungeonId(e.target.value)} disabled={busy || dungeons.length === 0 || lockedDungeon !== undefined}>
             {dungeons.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.name}
@@ -75,6 +80,7 @@ export function StartQuestDialog({ quest, onClose }: StartQuestDialogProps) {
             ))}
           </select>
         </label>
+        {lockedDungeon && <p>這個委託已在這座地下城開始過，會接續原本的工作目錄。</p>}
         {error && <p role="alert" className="form-error">{error}</p>}
         <div className="form-actions">
           <button type="submit" className="primary" disabled={busy || !npcId || !dungeonId}>

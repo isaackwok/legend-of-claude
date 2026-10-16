@@ -82,4 +82,30 @@ describe('DungeonsPanel', () => {
     expect(fetchFn.mock.calls.some(([u, i]) => u === '/api/dungeons/d1' && i?.method === 'DELETE')).toBe(true);
     expect(screen.queryByText('/dev/shop-api')).toBeNull();
   });
+
+  it('盤點倉庫 posts the refresh and shows the connector count, or the server error', async () => {
+    let fail = false;
+    const fetchFn = mockFetch((path, init) => {
+      if (path === '/inventory/refresh' && init.method === 'POST') {
+        return fail
+          ? { status: 502, body: { error: '倉庫盤點失敗：連線逾時' } }
+          : {
+              body: [
+                { name: 'claude.ai Atlassian', prefix: 'claude_ai_Atlassian', status: 'connected' },
+                { name: 'claude.ai Slack', prefix: 'claude_ai_Slack', status: 'needs-auth' },
+              ],
+            };
+      }
+      return { body: [] };
+    });
+    render(<DungeonsPanel />);
+    fireEvent.click(screen.getByRole('button', { name: '盤點倉庫' }));
+    expect((await screen.findByRole('status')).textContent).toBe('找到 2 個 connector（1 個已連線）');
+    expect(fetchFn.mock.calls.some(([url, init]) => String(url) === '/api/inventory/refresh' && init?.method === 'POST')).toBe(true);
+
+    fail = true;
+    fireEvent.click(screen.getByRole('button', { name: '盤點倉庫' }));
+    await waitFor(() => expect(screen.getAllByRole('alert').some((a) => a.textContent === '倉庫盤點失敗：連線逾時')).toBe(true));
+    expect(screen.queryByRole('status')).toBeNull();
+  });
 });

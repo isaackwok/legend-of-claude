@@ -11,6 +11,52 @@ interface ScanResult {
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+interface Connector {
+  name: string;
+  prefix: string;
+  status: string;
+}
+
+/** 盤點倉庫: re-take the claude.ai connector inventory that NPC equipment is checked against. */
+function InventoryBlock() {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string>();
+  const [error, setError] = useState<string>();
+
+  const refresh = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const list = await api<Connector[]>('/inventory/refresh', { method: 'POST' });
+      const connected = list.filter((c) => c.status === 'connected').length;
+      setResult(`找到 ${list.length} 個 connector（${connected} 個已連線）`);
+    } catch (err) {
+      setResult(undefined);
+      setError(message(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="frame dungeons-block">
+      <h2>倉庫</h2>
+      <p>盤點你在 claude.ai 連上的 connectors（Jira、GitHub 等），冒險者只能用自己裝備的那些。</p>
+      <div className="form-actions">
+        <button type="button" disabled={busy} onClick={() => void refresh()}>
+          {busy ? '盤點中…' : '盤點倉庫'}
+        </button>
+      </div>
+      {result && <p role="status">{result}</p>}
+      {error && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function DungeonsPanel() {
   const dungeonMap = useGame((s) => s.dungeons);
   const dungeons = Object.values(dungeonMap).sort((a, b) => a.name.localeCompare(b.name));
@@ -165,6 +211,7 @@ export function DungeonsPanel() {
           </>
         )}
       </div>
+      <InventoryBlock />
       <form className="frame dungeons-block form" onSubmit={(e) => void registerManual(e)}>
         <h2>手動登記</h2>
         <label>

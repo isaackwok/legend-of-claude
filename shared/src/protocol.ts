@@ -1,5 +1,8 @@
 import type { Approval, Dungeon, GameEvent, Npc, Quest, SessionIndexEntry } from './types.js';
 
+/** The warning the startup check adds when not logged in; the client shows its own banner for it instead. */
+export const NOT_LOGGED_IN_WARNING = '請先在終端機執行 claude 並用 claude.ai 帳號登入';
+
 export interface Preflight {
   ignoredEnvVars: string[];
   apiKeySource?: string;

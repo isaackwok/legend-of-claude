@@ -176,6 +176,36 @@ describe('SettlementDialog', () => {
     expect(screen.queryByRole('link')).toBeNull();
   });
 
+  it('says the quest stays in review when the push failed, with the branch and worktree path (R35)', async () => {
+    const failed = record({
+      prUrl: undefined,
+      accepted: false,
+      branch: 'loc/LOC-7-abcdef',
+      worktreePath: '/data/worktrees/loc-LOC-7-abcdef',
+      results: [{ action: 'pushAndPr', ok: false, message: '推送分支失敗：Permission denied' }],
+    });
+    mockFetch((path) => (path.endsWith('/settle') ? { body: failed } : { body: OPTIONS_JIRA }));
+    open(jiraQuest());
+    await screen.findByLabelText('推上分支並開 PR');
+    fireEvent.click(screen.getByRole('button', { name: '結算' }));
+    await screen.findByRole('button', { name: '關閉' });
+    expect(screen.getByText('委託仍在待驗收，可修正後重新結算')).toBeTruthy();
+    expect(screen.getByText('loc/LOC-7-abcdef')).toBeTruthy();
+    expect(screen.getByText('/data/worktrees/loc-LOC-7-abcdef')).toBeTruthy();
+    expect(screen.getByText(/推送分支失敗：Permission denied/)).toBeTruthy();
+  });
+
+  it('shows the branch and worktree path but no stays-in-review note after an accepted settle', async () => {
+    mockFetch((path) => (path.endsWith('/settle') ? { body: record({ accepted: true, branch: 'loc/q', worktreePath: '/w/loc-q' }) } : { body: OPTIONS_JIRA }));
+    open(jiraQuest());
+    await screen.findByLabelText('推上分支並開 PR');
+    fireEvent.click(screen.getByRole('button', { name: '結算' }));
+    await screen.findByRole('button', { name: '關閉' });
+    expect(screen.getByText('loc/q')).toBeTruthy();
+    expect(screen.getByText('/w/loc-q')).toBeTruthy();
+    expect(screen.queryByText('委託仍在待驗收，可修正後重新結算')).toBeNull();
+  });
+
   it('disables 結算 and explains when the quest is no longer in review', async () => {
     mockFetch(() => ({ body: OPTIONS_JIRA }));
     open(jiraQuest());
