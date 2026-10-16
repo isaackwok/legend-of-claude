@@ -1,0 +1,112 @@
+<style>
+  .parch{background:#e9dcc0;background-image:radial-gradient(ellipse at 30% 20%,rgba(255,250,235,.55),transparent 60%),radial-gradient(ellipse at 80% 90%,rgba(120,90,50,.18),transparent 55%);border:2px solid #4a3a28;border-radius:6px;box-shadow:inset 0 0 40px rgba(90,60,30,.35);color:#2e2418;font-family:"Kaiti TC","STKaiti","Songti TC",serif}
+  .ink text{font-family:"Kaiti TC","STKaiti","Songti TC",serif;fill:#2e2418}
+  .note{background:#f4ead2;border:1.5px solid #4a3a28;border-radius:3px;padding:8px 10px;margin:8px 0;box-shadow:2px 3px 0 rgba(60,40,20,.25);position:relative;font-size:13px;line-height:1.45}
+  .note:before{content:"";position:absolute;top:-6px;left:50%;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:#7a2e1e;box-shadow:0 1px 0 #3a150c}
+  .note .id{font-family:ui-monospace,monospace;font-size:11px;opacity:.7}
+  .note .who{font-size:12px;margin-top:4px}
+  .col h4{margin:0 0 4px;text-align:center;border-bottom:1.5px dashed #4a3a28;padding-bottom:4px;font-size:15px}
+  .cols{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:14px}
+  .wall{position:relative;height:330px;padding:10px}
+  .wall .note{position:absolute;width:150px}
+  .seal{display:inline-block;width:14px;height:14px;border-radius:50%;vertical-align:-2px;margin-right:4px;border:1px solid #2e2418}
+  .legend{font-size:12px;padding:0 14px 12px}
+  .guess{font-size:12px;color:#8a5a2b}
+</style>
+
+<h2>城鎮與委託佈告欄（草圖）</h2>
+<p class="subtitle">畫風是往 Greedy Cave 的手繪墨線＋羊皮紙方向近似，不是最終美術。標「猜」的是我補的，你沒說過。</p>
+
+<div class="section">
+  <h3>① 城鎮中心</h3>
+  <div class="parch" style="padding:6px">
+    <svg class="ink" viewBox="0 0 820 380" width="100%">
+      <defs>
+        <filter id="rough"><feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="3"/><feDisplacementMap in="SourceGraphic" scale="3.2"/></filter>
+      </defs>
+      <g filter="url(#rough)" stroke="#2e2418" stroke-width="2.2" fill="none" stroke-linecap="round">
+        <!-- paths -->
+        <path d="M410 190 L410 360 M410 190 L120 120 M410 190 L700 120 M410 190 L150 300 M410 190 L690 300" stroke-dasharray="6 7" stroke-width="1.6" opacity=".7"/>
+        <!-- plaza -->
+        <ellipse cx="410" cy="190" rx="95" ry="55" fill="#ddcca7"/>
+        <!-- quest board -->
+        <rect x="370" y="150" width="80" height="52" fill="#c9a877"/>
+        <path d="M378 202 L378 222 M442 202 L442 222"/>
+        <rect x="380" y="158" width="18" height="16" fill="#f4ead2"/><rect x="402" y="160" width="18" height="14" fill="#f4ead2"/><rect x="424" y="157" width="18" height="17" fill="#f4ead2"/>
+        <rect x="390" y="178" width="18" height="16" fill="#f4ead2"/><rect x="414" y="179" width="18" height="15" fill="#f4ead2"/>
+        <!-- tavern -->
+        <path d="M70 140 L70 90 L120 55 L170 90 L170 140 Z" fill="#cdb48a"/><rect x="108" y="110" width="22" height="30" fill="#8b6b45"/><path d="M85 100 h16 v14 h-16z M140 100 h16 v14 h-16z" fill="#f2d98a"/>
+        <!-- mage tower -->
+        <path d="M680 140 L680 60 L700 30 L720 60 L720 140 Z" fill="#c4b18f"/><path d="M693 75 h14 v18 h-14z" fill="#9ec3d6"/><circle cx="700" cy="24" r="5" fill="#9ec3d6"/>
+        <!-- guild hall -->
+        <path d="M95 330 L95 275 L150 245 L205 275 L205 330 Z" fill="#c9b08a"/><path d="M135 300 h30 v30 h-30z" fill="#8b6b45"/><path d="M150 245 L150 225 L172 232 L150 238" fill="#a5432e"/>
+        <!-- dungeon gates -->
+        <path d="M640 330 Q690 250 740 330 Z" fill="#5a4a3a"/><path d="M660 330 Q690 280 720 330" fill="#1e1710"/>
+        <!-- inn / archive -->
+        <path d="M380 350 L380 320 L410 300 L440 320 L440 350 Z" fill="#cdb48a"/>
+        <!-- player -->
+        <circle cx="470" cy="215" r="9" fill="#f4ead2"/><path d="M470 224 L470 240 M462 232 L478 232 M470 240 L464 250 M470 240 L476 250"/>
+        <!-- npcs -->
+        <circle cx="200" cy="150" r="7" fill="#f4ead2"/><path d="M200 157 v12"/>
+        <circle cx="640" cy="160" r="7" fill="#f4ead2"/><path d="M640 167 v12"/>
+        <circle cx="250" cy="285" r="7" fill="#f4ead2"/><path d="M250 292 v12"/><circle cx="268" cy="290" r="7" fill="#f4ead2"/><path d="M268 297 v12"/>
+      </g>
+      <g font-size="15">
+        <text x="355" y="140">📜 委託佈告欄</text>
+        <text x="58" y="44">🍺 酒館</text><text x="44" y="165" font-size="12">招募／建立冒險者（猜）</text>
+        <text x="660" y="18" font-size="14">🔮 法師塔</text><text x="635" y="160" font-size="12" dx="-40" dy="-22">傳授技能（猜）</text>
+        <text x="95" y="352">⚔️ 公會大廳</text><text x="95" y="370" font-size="12">組隊（猜）</text>
+        <text x="630" y="352">🕳️ 地下城入口</text><text x="600" y="370" font-size="12">每個專案＝一座地下城（猜）</text>
+        <text x="372" y="372" font-size="12">📚 書庫：報告卷軸（猜）</text>
+        <text x="484" y="212" font-size="12">你</text>
+      </g>
+    </svg>
+  </div>
+  <p class="guess">猜：Jira 票、bug、程式碼導覽都屬「地下城」裡的工作，NPC 接下委託就是「出發探索」那座地下城（＝那個 repo）。</p>
+</div>
+
+<div class="section">
+  <h3>② 打開佈告欄：兩種呈現方式</h3>
+  <p class="subtitle">都跟 Jira 分開管理。哪一種比較接近你腦中的畫面？點一下選它。</p>
+
+  <div class="options">
+    <div class="option" data-choice="columns" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>分欄佈告欄（看板式）</h3>
+        <p>欄位就是狀態，一眼看清楚流程；比較像工具。</p>
+        <div class="parch cols">
+          <div class="col"><h4>待接委託</h4>
+            <div class="note"><div class="id">SHOP-482 · 🕳️ shop-api</div>修正商品庫存同步延遲<div class="who">賞金 ★★</div></div>
+            <div class="note"><div class="id">SHOP-490 · 🕳️ shop-api</div>新增退貨原因欄位</div>
+          </div>
+          <div class="col"><h4>冒險中</h4>
+            <div class="note"><div class="id">SHOP-471 · 🕳️ shop-api</div>調查訂單重複扣款<div class="who">🧙 艾拉 探索第 3 層…</div></div>
+          </div>
+          <div class="col"><h4>待驗收</h4>
+            <div class="note"><div class="id">本地委託</div>導覽：結帳流程<div class="who">🛡️ 鐵衛小隊 · 📜 已帶回卷軸</div></div>
+          </div>
+          <div class="col"><h4>已完成</h4>
+            <div class="note" style="opacity:.6"><div class="id">新手委託</div>到法師塔學第一個技能</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="option" data-choice="wall" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>一整面木牆（蠟封顏色＝狀態）</h3>
+        <p>委託單隨意釘在牆上，用蠟封顏色表示狀態；比較像遊戲，但多了以後較難掃視。</p>
+        <div class="parch wall">
+          <div class="note" style="left:14px;top:18px;transform:rotate(-3deg)"><span class="seal" style="background:#e9dcc0"></span><span class="id">SHOP-482</span><br>修正商品庫存同步延遲</div>
+          <div class="note" style="left:190px;top:40px;transform:rotate(2deg)"><span class="seal" style="background:#c9822e"></span><span class="id">SHOP-471</span><br>調查訂單重複扣款<div class="who">🧙 艾拉 冒險中</div></div>
+          <div class="note" style="left:370px;top:12px;transform:rotate(-1deg)"><span class="seal" style="background:#7a2e1e"></span><span class="id">本地委託</span><br>導覽：結帳流程<div class="who">📜 待你驗收</div></div>
+          <div class="note" style="left:60px;top:170px;transform:rotate(3deg)"><span class="seal" style="background:#e9dcc0"></span><span class="id">SHOP-490</span><br>新增退貨原因欄位</div>
+          <div class="note" style="left:270px;top:190px;transform:rotate(-2deg);opacity:.55"><span class="seal" style="background:#4f6b3a"></span><span class="id">新手委託</span><br>到法師塔學第一個技能</div>
+        </div>
+        <div class="legend"><span class="seal" style="background:#e9dcc0"></span>待接 <span class="seal" style="background:#c9822e"></span>冒險中 <span class="seal" style="background:#7a2e1e"></span>待驗收 <span class="seal" style="background:#4f6b3a"></span>完成</div>
+      </div>
+    </div>
+  </div>
+</div>

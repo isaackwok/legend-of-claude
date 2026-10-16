@@ -1,0 +1,70 @@
+<style>
+  .parch{background:#e9dcc0;background-image:radial-gradient(ellipse at 30% 20%,rgba(255,250,235,.55),transparent 60%),radial-gradient(ellipse at 80% 90%,rgba(120,90,50,.18),transparent 55%);border:2px solid #4a3a28;border-radius:6px;box-shadow:inset 0 0 40px rgba(90,60,30,.35);color:#2e2418;font-family:"Kaiti TC","STKaiti","Songti TC",serif;padding:14px}
+  .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+  .panel{background:#f4ead2;border:1.5px solid #4a3a28;border-radius:4px;padding:10px}
+  .panel h4{margin:0 0 8px;font-size:15px;border-bottom:1.5px dashed #4a3a28;padding-bottom:4px}
+  .slot{display:flex;align-items:center;gap:8px;border:1.5px solid #4a3a28;border-radius:4px;padding:5px 8px;margin-bottom:6px;background:#efe2c4;font-size:13px}
+  .slot .x{margin-left:auto;font-size:12px;opacity:.6}
+  .search{border:1.5px solid #4a3a28;border-radius:14px;padding:4px 10px;font-size:12px;background:#fffaf0;margin-bottom:8px;font-family:-apple-system,sans-serif;color:#8a7a60}
+  .tabs{display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap}
+  .tabs span{font-size:12px;border:1.5px solid #4a3a28;border-bottom:none;border-radius:6px 6px 0 0;padding:2px 9px;background:#e2d2ae}
+  .tabs span.on{background:#4a3a28;color:#f4ead2}
+  .inv{display:grid;grid-template-columns:repeat(auto-fill,minmax(54px,1fr));gap:6px}
+  .cell{aspect-ratio:1;border:1.5px solid #4a3a28;border-radius:4px;background:#efe2c4;display:flex;align-items:center;justify-content:center;font-size:24px;position:relative}
+  .cell.eq:after{content:"✓";position:absolute;right:2px;bottom:0;font-size:11px;color:#7a2e1e;font-weight:bold}
+  .cell.hover{outline:3px solid #c9822e}
+  .tip{margin-top:8px;border:1.5px solid #4a3a28;border-radius:4px;background:#fffaf0;padding:8px;font-size:12.5px;line-height:1.5}
+  .tip b{font-size:14px}
+  .tip .meta{font-family:-apple-system,sans-serif;font-size:11px;color:#8a5a2b}
+  .row{display:flex;align-items:center;gap:10px;border-bottom:1px dashed #b49d74;padding:7px 2px;font-size:13px}
+  .row:last-child{border-bottom:none}
+  .row .p{font-family:ui-monospace,monospace;font-size:11px;color:#6b4a22}
+  .row .chk{width:16px;height:16px;border:1.5px solid #4a3a28;border-radius:3px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;background:#fffaf0}
+  .row .gh{margin-left:auto;font-family:-apple-system,sans-serif;font-size:11px;color:#4a3a28}
+  .note{font-size:12px;color:#8a5a2b;margin-top:6px}
+</style>
+
+<h2>裝備／技能怎麼選 ＋ 地下城地圖（草圖 v3）</h2>
+<p class="subtitle">標「猜」的是我補的。</p>
+
+<div class="section">
+  <h3>① 背包式選擇（取代一整排 pill）</h3>
+  <div class="parch two">
+    <div class="panel">
+      <h4>🧔 博格 身上的（已裝備）</h4>
+      <div class="label" style="font-size:11px;margin:4px 0">裝備</div>
+      <div class="slot">🗂️ Jira 卷軸袋<span class="x">卸下 ✕</span></div>
+      <div class="slot">🐙 GitHub 鑰匙<span class="x">卸下 ✕</span></div>
+      <div class="label" style="font-size:11px;margin:8px 0 4px">技能</div>
+      <div class="slot">🧪 重現 bug 先寫測試<span class="x">遺忘 ✕</span></div>
+      <div class="slot">📐 Go 慣例<span class="x">遺忘 ✕</span></div>
+      <p class="note">左邊只列「已經裝上的」，所以永遠很短、好讀。</p>
+    </div>
+    <div class="panel">
+      <h4>🎒 公會倉庫</h4>
+      <div class="search">🔍 搜尋：名稱、用途、標籤…</div>
+      <div class="tabs"><span>全部</span><span class="on">技能</span><span>裝備</span><span>⭐ 常用</span></div>
+      <div class="inv">
+        <div class="cell eq">🧪</div><div class="cell eq">📐</div><div class="cell hover">📝</div><div class="cell">🔍</div>
+        <div class="cell">🗺️</div><div class="cell">🧹</div><div class="cell">🔐</div><div class="cell">📊</div>
+        <div class="cell">🐞</div><div class="cell">📦</div><div class="cell">⚡</div><div class="cell">＋</div>
+      </div>
+      <div class="tip"><b>📝 產生 PR 描述</b><br>根據 diff 與委託內容寫出 PR 標題與說明。<div class="meta">技能 · 來源：法師塔自製 · 被 3 位冒險者裝備</div></div>
+      <p class="note">點一下＝裝上／卸下；滑過顯示說明。分頁＋搜尋解決「選項很多」。（猜：⭐常用＝最常被裝的）</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>② 地下城地圖：登記本機專案</h3>
+  <div class="parch">
+    <div class="panel">
+      <h4>🗺️ 探勘 <span class="p" style="font-family:ui-monospace,monospace;font-size:12px">~/dev</span> 發現的地下城 <span style="font-size:11px;font-weight:normal">（變更探勘資料夾…）</span></h4>
+      <div class="row"><span class="chk">✓</span>🕳️ <b>shop-api</b> <span class="p">~/dev/shop-api</span><span class="gh">🐙 acme/shop-api</span></div>
+      <div class="row"><span class="chk">✓</span>🕳️ <b>notes-app</b> <span class="p">~/dev/notes-app</span><span class="gh">🐙 acme/notes-app</span></div>
+      <div class="row"><span class="chk"></span>🕳️ <b>playground</b> <span class="p">~/dev/playground</span><span class="gh" style="opacity:.6">（無 remote）</span></div>
+      <div class="row" style="color:#8a5a2b">＋ 手動加入其他路徑…</div>
+    </div>
+    <p class="note">打勾＝登記成地下城，之後在「駐地」與派委託時從這份清單選。GitHub repo 從 git remote 自動對應（猜；畫面上的 repo 名稱是假設的）。</p>
+  </div>
+</div>

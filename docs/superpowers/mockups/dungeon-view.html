@@ -1,0 +1,88 @@
+<style>
+  .parch{background:#e9dcc0;background-image:radial-gradient(ellipse at 30% 20%,rgba(255,250,235,.55),transparent 60%),radial-gradient(ellipse at 80% 90%,rgba(120,90,50,.18),transparent 55%);border:2px solid #4a3a28;border-radius:6px;box-shadow:inset 0 0 40px rgba(90,60,30,.35);color:#2e2418;font-family:"Kaiti TC","STKaiti","Songti TC",serif}
+  .wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;padding:12px}
+  .ink text{font-family:"Kaiti TC","STKaiti","Songti TC",serif;fill:#2e2418}
+  .log{background:#f4ead2;border:1.5px solid #4a3a28;border-radius:4px;padding:10px;font-size:13px;line-height:1.55}
+  .log h4{margin:0 0 6px;font-size:15px;border-bottom:1.5px dashed #4a3a28;padding-bottom:4px}
+  .ev{display:grid;grid-template-columns:1fr;border-bottom:1px dashed #c4ad83;padding:4px 0}
+  .ev .real{font-family:ui-monospace,monospace;font-size:10.5px;color:#6b4a22}
+  .btns{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .btn{border:1.5px solid #4a3a28;border-radius:4px;padding:4px 10px;font-size:13px;background:#e2d2ae}
+  table.map{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+  table.map td{border-bottom:1px dashed #b49d74;padding:5px 6px;vertical-align:top}
+  table.map td:first-child{white-space:nowrap;font-weight:bold}
+  table.map td.r{font-family:ui-monospace,monospace;font-size:11.5px;color:#6b4a22}
+</style>
+
+<h2>地下城觀戰畫面（草圖）</h2>
+<p class="subtitle">地圖＝專案資料夾；NPC 的每個動作＝他真實在做的事（從 SDK 串流的工具呼叫翻譯而來）。全部是我的提案。</p>
+
+<div class="parch wrap">
+  <svg class="ink" viewBox="0 0 520 380" width="100%">
+    <defs>
+      <filter id="rough2"><feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="7"/><feDisplacementMap in="SourceGraphic" scale="3"/></filter>
+      <pattern id="fog" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#3b2f22"/><path d="M0 8 L8 0" stroke="#55442f" stroke-width="1.2"/></pattern>
+    </defs>
+    <g filter="url(#rough2)" stroke="#2e2418" stroke-width="2.2" stroke-linecap="round">
+      <!-- corridors -->
+      <path d="M260 40 L260 95 M260 150 L140 200 M260 150 L380 200 M140 255 L140 300 M380 255 L380 300 M260 150 L260 300" fill="none" stroke-dasharray="5 6" stroke-width="1.6"/>
+      <!-- entrance -->
+      <path d="M225 40 Q260 5 295 40 Z" fill="#5a4a3a"/>
+      <!-- rooms explored -->
+      <rect x="205" y="95" width="110" height="55" fill="#ddcca7"/>
+      <rect x="320" y="200" width="120" height="55" fill="#f1d9a6" stroke-width="3"/>
+      <rect x="80" y="200" width="120" height="55" fill="#ddcca7"/>
+      <!-- fogged rooms -->
+      <rect x="80" y="300" width="120" height="55" fill="url(#fog)"/>
+      <rect x="200" y="300" width="120" height="55" fill="url(#fog)"/>
+      <rect x="320" y="300" width="120" height="55" fill="url(#fog)"/>
+      <!-- bookshelf in payment room -->
+      <path d="M330 210 h22 v34 h-22 z M330 221 h22 M330 232 h22" fill="#c9a877" stroke-width="1.6"/>
+      <!-- anvil -->
+      <path d="M405 238 h26 l-5 -8 h-16 z M412 238 v8 h12 v-8" fill="#6b5a48" stroke-width="1.6"/>
+      <!-- NPC Ella (simple sketch figure) -->
+      <circle cx="385" cy="222" r="7" fill="#f4ead2"/>
+      <path d="M385 229 v14 M378 235 h14 M385 243 l-5 9 M385 243 l5 9" fill="none"/>
+      <path d="M379 214 l6 -10 l6 10" fill="#7a2e1e" stroke-width="1.6"/>
+      <!-- monster in tests room (fogged edge) -->
+      <path d="M440 330 q10 -18 22 0 q-4 10 -11 10 q-7 0 -11 -10z" fill="#7a2e1e" stroke-width="1.6"/>
+      <circle cx="447" cy="328" r="1.5" fill="#f4ead2" stroke="none"/><circle cx="455" cy="328" r="1.5" fill="#f4ead2" stroke="none"/>
+    </g>
+    <g font-size="13">
+      <text x="236" y="30">入口</text>
+      <text x="230" y="127">api/</text>
+      <text x="343" y="196" font-weight="bold">payment/</text>
+      <text x="108" y="232">dispatch/</text>
+      <text x="113" y="332" fill="#e9dcc0" style="fill:#e9dcc0">driver/</text>
+      <text x="236" y="332" style="fill:#e9dcc0">config/</text>
+      <text x="357" y="332" style="fill:#e9dcc0">tests/</text>
+      <text x="395" y="210" font-size="12">艾拉</text>
+      <text x="420" y="372" font-size="11">失敗的測試＝怪物</text>
+    </g>
+  </svg>
+
+  <div class="log">
+    <h4>艾拉的冒險即時紀錄 · SHOP-471</h4>
+    <div class="ev">走進 payment/ 房間，迷霧散開<span class="real">Glob payment/**</span></div>
+    <div class="ev">在書架前翻閱古籍《charge.go》<span class="real">Read payment/charge.go</span></div>
+    <div class="ev">發現可疑的符文：重試時沒檢查冪等鍵<span class="real">（assistant 訊息摘要）</span></div>
+    <div class="ev">走向 tests/，遭遇怪物「重複扣款」<span class="real">Bash go test ./payment/... → 1 failed</span></div>
+    <div class="ev">回到鐵砧前鍛造修正<span class="real">Edit payment/charge.go</span></div>
+    <div class="ev" style="opacity:.6">……</div>
+    <div class="btns"><span class="btn">傳信給艾拉</span><span class="btn">召回</span><span class="btn">回城（她會繼續冒險）</span></div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>動作對照表（提案）</h3>
+  <table class="map">
+    <tr><td>資料夾</td><td>地下城的房間；沒去過的蓋著迷霧，去過就點亮</td><td class="r">掃描專案目錄</td></tr>
+    <tr><td>讀檔／搜尋</td><td>在書架前翻閱古籍</td><td class="r">Read / Grep / Glob</td></tr>
+    <tr><td>改檔</td><td>在鐵砧前鍛造</td><td class="r">Edit / Write</td></tr>
+    <tr><td>跑測試</td><td>跟怪物戰鬥；失敗＝怪物還活著，全過＝擊敗</td><td class="r">Bash（測試指令）</td></tr>
+    <tr><td>其他指令</td><td>施法</td><td class="r">Bash</td></tr>
+    <tr><td>用 connector</td><td>拿出裝備，例如翻開 Jira 卷軸袋</td><td class="r">mcp__* 工具</td></tr>
+    <tr><td>壓縮對話</td><td>坐下整理筆記</td><td class="r">compact</td></tr>
+    <tr><td>等你批准</td><td>放出信鴿，停在原地等</td><td class="r">canUseTool</td></tr>
+  </table>
+</div>

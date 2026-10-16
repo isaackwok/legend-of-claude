@@ -1,0 +1,72 @@
+<style>
+  .parch{background:#e9dcc0;background-image:radial-gradient(ellipse at 30% 20%,rgba(255,250,235,.55),transparent 60%),radial-gradient(ellipse at 80% 90%,rgba(120,90,50,.18),transparent 55%);border:2px solid #4a3a28;border-radius:6px;box-shadow:inset 0 0 40px rgba(90,60,30,.35);color:#2e2418;font-family:"Kaiti TC","STKaiti","Songti TC",serif}
+  .steps{display:flex;gap:6px;margin:10px 0 14px;flex-wrap:wrap}
+  .step{padding:4px 10px;border:1.5px solid #4a3a28;border-radius:14px;font-size:13px;background:#f4ead2}
+  .step.on{background:#4a3a28;color:#f4ead2}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;padding:16px}
+  .portrait{border:2px dashed #4a3a28;border-radius:4px;height:180px;display:flex;align-items:center;justify-content:center;font-size:64px;background:#f4ead2}
+  .field{margin-bottom:12px}
+  .field label{display:block;font-weight:bold;font-size:14px;margin-bottom:3px}
+  .field .hint{font-size:11px;color:#8a5a2b;font-family:-apple-system,sans-serif}
+  .box{background:#f4ead2;border:1.5px solid #4a3a28;border-radius:3px;padding:6px 8px;font-size:13px}
+  .chips span{display:inline-block;border:1.5px solid #4a3a28;border-radius:12px;padding:2px 9px;margin:2px;font-size:12px;background:#f4ead2}
+  .chips span.sel{background:#7a2e1e;color:#f4ead2}
+  .map{font-family:-apple-system,sans-serif;font-size:12px;color:#2e2418;background:#f9f3e3;border:1px solid #c9b48c;border-radius:4px;padding:10px}
+  .map b{font-family:ui-monospace,monospace;font-size:11px}
+  .map div{margin-bottom:6px}
+  .classes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;padding:14px}
+  .cls{background:#f4ead2;border:1.5px solid #4a3a28;border-radius:4px;padding:10px;font-size:12.5px;line-height:1.5}
+  .cls h4{margin:0 0 4px;font-size:16px}
+  .cls .sdk{font-family:ui-monospace,monospace;font-size:10.5px;color:#6b4a22;margin-top:6px}
+</style>
+
+<h2>酒館：招募冒險者（草圖）</h2>
+<p class="subtitle">我提的版本，標「猜」的你都可以推翻。每個欄位背後對應的 Agent SDK 設定寫在右邊。</p>
+
+<div class="section">
+  <h3>第 0 步：先選職業（＝預設模板，幫你填好大部分欄位）</h3>
+  <div class="parch classes">
+    <div class="cls"><h4>⚔️ 戰士</h4>修 bug、實作功能。會改檔、跑測試、commit。<div class="sdk">model: Opus · effort: high<br>tools: 全部 · auto mode</div></div>
+    <div class="cls"><h4>📖 學者</h4>讀程式、解釋流程、寫調查報告。<b>不會改檔</b>。<div class="sdk">model: Sonnet<br>disallowed: Edit / Write</div></div>
+    <div class="cls"><h4>🏹 斥候</h4>快速查找：某函式在哪、某設定怎麼用。便宜又快。<div class="sdk">model: Haiku · effort: low<br>唯讀</div></div>
+    <div class="cls"><h4>🎲 自由人</h4>什麼都不預設，全部自己填。<div class="sdk">空白模板</div></div>
+  </div>
+  <p class="subtitle" style="font-size:12px">猜：公會櫃檯（處理 Jira）是內建 NPC，不在可招募職業裡。</p>
+</div>
+
+<div class="section">
+  <h3>招募表單</h3>
+  <div class="steps"><span class="step">0 職業</span><span class="step on">1 身分</span><span class="step on">2 資質</span><span class="step on">3 裝備</span><span class="step on">4 技能</span><span class="step on">5 駐地</span></div>
+  <div class="parch grid">
+    <div>
+      <div class="portrait">🧔</div>
+      <p style="font-size:12px;text-align:center;margin:6px 0">◀ 換外觀 ▶</p>
+    </div>
+    <div>
+      <div class="field"><label>1 · 名字／稱號</label><div class="box">鐵匠 博格</div></div>
+      <div class="field"><label>1 · 人設（個性＋專長）</label>
+        <div class="box" style="min-height:60px">沉默寡言的老鐵匠，shop-api 後端老手，熟 Go 與結帳流程。修 bug 前一定先寫出能重現問題的測試，回報時只講重點。</div>
+        <div class="hint">✨ 也可以只寫一句「想要一個擅長後端 bug 的穩重老手」，請酒館老闆幫你寫完整人設（猜）</div>
+      </div>
+      <div class="field"><label>2 · 資質（模型）／專注度（effort）</label>
+        <div class="chips"><span class="sel">Opus</span><span>Sonnet</span><span>Haiku</span> ｜ <span>低</span><span>中</span><span class="sel">高</span></div>
+      </div>
+      <div class="field"><label>3 · 裝備（connectors 與工具限制）</label>
+        <div class="chips"><span class="sel">🗂️ Jira 卷軸袋</span><span class="sel">🐙 GitHub 鑰匙</span><span>💬 Slack 號角</span><span>💍 唯讀之戒（禁止改檔）</span></div>
+      </div>
+      <div class="field"><label>4 · 技能（從法師塔已學的技能中挑，不限數量）</label>
+        <div class="chips"><span class="sel">重現 bug 先寫測試</span><span class="sel">Go 慣例</span><span>產生 PR 描述</span><span>＋ 去法師塔學新技能</span></div>
+      </div>
+      <div class="field"><label>5 · 駐地（預設地下城＝預設專案，可空）</label><div class="box">🕳️ shop-api</div></div>
+    </div>
+    <div class="map">
+      <div><b>名字/外觀</b> → 只存在遊戲裡</div>
+      <div><b>人設</b> → systemPrompt（接在 Claude Code 預設 prompt 後面）</div>
+      <div><b>資質/專注度</b> → model、effort</div>
+      <div><b>裝備</b> → 允許哪些 claude.ai connectors；唯讀之戒＝disallowedTools</div>
+      <div><b>技能</b> → 這個 NPC 載入的 Skills</div>
+      <div><b>駐地</b> → 預設 cwd；派委託時可改</div>
+      <div style="margin-top:10px;color:#8a5a2b">權限模式固定 auto，不放在表單上（你前面說跟 Claude Code 一致）。</div>
+    </div>
+  </div>
+</div>
