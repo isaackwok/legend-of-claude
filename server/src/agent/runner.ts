@@ -216,6 +216,9 @@ export class AgentRun {
 
   private async run(): Promise<RunOutcome> {
     let outcome: RunOutcome | undefined;
+    // A result with queued sends means another turn is under way; until its own result arrives the
+    // earlier outcome is provisional, so a recall in between must win over it.
+    let turnPending = false;
     let thrown: string | undefined;
     let costUsd = 0;
     try {
@@ -236,7 +239,8 @@ export class AgentRun {
             outcome = this.outcomeOf(msg);
           }
           // One prompt, one result: unless more user sends are already queued, let the query finish.
-          if (!(msg.queued_turn_count && msg.queued_turn_count > 0)) this.input.end();
+          turnPending = !!(msg.queued_turn_count && msg.queued_turn_count > 0);
+          if (!turnPending) this.input.end();
           continue;
         }
         if (!this.recalled) this.emit(msg);
@@ -249,7 +253,7 @@ export class AgentRun {
       if (this.sessionId) this.params.broker.cancelForSession(this.sessionId);
       if (!this.initSeen) this.rejectInit(new Error(thrown ?? 'session ended before init'));
     }
-    if (this.recalled && !outcome) {
+    if (this.recalled && (!outcome || turnPending)) {
       this.emitError(RECALLED);
       return { ok: false, errors: [RECALLED], sessionId: this.sessionId, costUsd };
     }
