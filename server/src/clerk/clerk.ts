@@ -188,7 +188,7 @@ export class ClerkService {
   /** Serializes settings read-modify-writes made here. */
   private settingsLock: Promise<unknown> = Promise.resolve();
   private readonly settling = new Set<string>();
-  private readonly importing = new Map<string, Promise<Quest>>();
+  private readonly importing = new Map<string, Promise<{ quest: Quest; created: boolean }>>();
 
   constructor(private readonly deps: ClerkDeps) {}
 
@@ -269,18 +269,23 @@ export class ClerkService {
    */
   async importJiraIssue(input: string): Promise<{ quest: Quest; created: boolean }> {
     const key = parseIssueKey(input);
-    const existing = await this.liveJiraQuest(key);
-    if (existing) return { quest: existing, created: false };
-    // A second import of the same key while the first is still with the clerk shares its result.
+    // Registered synchronously (before any await), so the first caller always owns the run and a later
+    // call can never slip between the live-quest read and the registration.
     const inFlight = this.importing.get(key);
-    if (inFlight) return { quest: await inFlight, created: false };
-    const job = this.importNew(key);
+    if (inFlight) return { quest: (await inFlight).quest, created: false };
+    const job = this.importOnce(key);
     this.importing.set(key, job);
     try {
-      return { quest: await job, created: true };
+      return await job;
     } finally {
       this.importing.delete(key);
     }
+  }
+
+  private async importOnce(key: string): Promise<{ quest: Quest; created: boolean }> {
+    const existing = await this.liveJiraQuest(key);
+    if (existing) return { quest: existing, created: false };
+    return { quest: await this.importNew(key), created: true };
   }
 
   private async importNew(key: string): Promise<Quest> {
