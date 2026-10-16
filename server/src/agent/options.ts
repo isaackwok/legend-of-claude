@@ -15,6 +15,10 @@ export const READ_ONLY_DENY = ['Edit', 'Write', 'NotebookEdit'] as const;
 
 /** Pushing and opening PRs is done by the game at settlement, never by an NPC (spike: auto mode allows push). */
 export const GIT_PUSH_DENY = ['Bash(git push *)', 'Bash(git push)'] as const;
+/** R37: the GitHub CLI's PR and API commands, also only for the game. Best-effort: other command forms can slip by. */
+export const GH_DENY = ['Bash(gh pr *)', 'Bash(gh api *)'] as const;
+/** Every NPC session (and the clerk's inventory session) gets these denies. */
+export const PUSH_DENY = [...GIT_PUSH_DENY, ...GH_DENY] as const;
 
 /** Connector prefixes found by the last inventory; `[]` before one exists (then no connector is denied). */
 export function connectorPrefixesFrom(settings: Settings): string[] {
@@ -45,8 +49,11 @@ export function connectorDenyRule(prefix: string): string {
   return `mcp__${normalizeConnectorPrefix(prefix)}__*`;
 }
 
-/** R29: tools the built-in clerk never gets. */
-export const CLERK_TOOL_DENY = ['Bash'] as const;
+/**
+ * R29 + R36: built-in tools the clerk never gets; it only needs its connectors and structured output.
+ * Denied one by one instead of `tools: []`, which would break json_schema structured output.
+ */
+export const CLERK_TOOL_DENY = ['Bash', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'Agent', 'NotebookEdit', 'TodoWrite'] as const;
 
 const CLERK_CONNECTOR = /atlassian|jira|github/i;
 
@@ -79,12 +86,15 @@ export function buildAgentOptions(input: BuildAgentOptionsInput): Options {
   const isClerk = npc.builtin === 'clerk';
   const equipped = new Set((isClerk ? clerkConnectors(input.allConnectorPrefixes) : npc.equipment.connectorPrefixes).map(normalizeConnectorPrefix));
   const connectorDenies = input.allConnectorPrefixes.filter((p) => !equipped.has(normalizeConnectorPrefix(p))).map(connectorDenyRule);
+  // A Set: the clerk is read-only and also lists NotebookEdit in CLERK_TOOL_DENY.
   const disallowedTools: string[] = [
-    ...GIT_PUSH_DENY,
-    ...(readOnly ? READ_ONLY_DENY : []),
-    // R29: the clerk never needs a shell; the game does all git work.
-    ...(isClerk ? CLERK_TOOL_DENY : []),
-    ...connectorDenies,
+    ...new Set<string>([
+      ...PUSH_DENY,
+      ...(readOnly ? READ_ONLY_DENY : []),
+      // R29/R36: the clerk never needs a shell or file/web tools; the game does all git work.
+      ...(isClerk ? CLERK_TOOL_DENY : []),
+      ...connectorDenies,
+    ]),
   ];
   const options: Options = {
     systemPrompt: { type: 'preset', preset: 'claude_code', append: appendPrompt ? `${npc.persona}\n\n${appendPrompt}` : npc.persona },

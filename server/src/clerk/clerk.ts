@@ -5,7 +5,7 @@ import type { McpServerStatus, Options, SDKUserMessage, SessionStore } from '@an
 import { z } from 'zod';
 import { STATUS_LABEL, type Npc, type Quest, type ServerMessage, type SettlementChoices, type SettlementRecord, type Settings } from '@loc/shared';
 import type { ApprovalBroker } from '../agent/approvals.js';
-import { buildAgentOptions, connectorPrefix, connectorPrefixesFrom, GIT_PUSH_DENY } from '../agent/options.js';
+import { buildAgentOptions, connectorPrefix, connectorPrefixesFrom, PUSH_DENY } from '../agent/options.js';
 import type { QueryFn } from '../agent/queryFn.js';
 import { AgentRun } from '../agent/runner.js';
 import { pushBranch } from '../git/worktree.js';
@@ -222,7 +222,7 @@ export class ClerkService {
         permissionMode: 'auto',
         env: this.env,
         persistSession: false,
-        disallowedTools: [...GIT_PUSH_DENY],
+        disallowedTools: [...PUSH_DENY],
       };
       let q: ReturnType<QueryFn> | undefined;
       try {

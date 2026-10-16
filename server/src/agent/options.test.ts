@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { repos as makeRepos, type Repos } from '../store/jsonRepo.js';
 import { sdkEnv } from '../preflight.js';
 import { ensureSeedNpcs, seedNpcs } from '../npcs/seeds.js';
-import { CLASS_TEMPLATES, GIT_PUSH_DENY, MODELS, READ_ONLY_DENY, buildAgentOptions, connectorDenyRule, connectorPrefix, connectorPrefixesFrom } from './options.js';
+import { CLASS_TEMPLATES, CLERK_TOOL_DENY, GH_DENY, GIT_PUSH_DENY, MODELS, READ_ONLY_DENY, buildAgentOptions, connectorDenyRule, connectorPrefix, connectorPrefixesFrom } from './options.js';
 
 const sessionStore = new InMemorySessionStore();
 
@@ -76,6 +76,26 @@ describe('buildAgentOptions', () => {
       expect(o.disallowedTools).toEqual(expect.arrayContaining([...GIT_PUSH_DENY]));
     }
     expect(GIT_PUSH_DENY).toEqual(['Bash(git push *)', 'Bash(git push)']);
+  });
+
+  it('denies gh pr and gh api for every npc, the clerk included (R37)', () => {
+    expect(GH_DENY).toEqual(['Bash(gh pr *)', 'Bash(gh api *)']);
+    const clerk = seedNpcs().find((n) => n.builtin === 'clerk')!;
+    for (const n of [...(Object.keys(CLASS_TEMPLATES) as ClassId[]).map((classId) => npc({ classId, ...CLASS_TEMPLATES[classId] })), clerk]) {
+      expect(build({ npc: n }).disallowedTools).toEqual(expect.arrayContaining(['Bash(gh pr *)', 'Bash(gh api *)']));
+    }
+  });
+
+  it('denies the clerk every built-in non-connector tool but keeps connectors usable (R36)', () => {
+    const clerk = seedNpcs().find((n) => n.builtin === 'clerk')!;
+    const c = build({ npc: clerk, allConnectorPrefixes: ['claude_ai_Atlassian', 'claude_ai_Gmail'] });
+    const builtins = ['Bash', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'Agent', 'NotebookEdit', 'TodoWrite'];
+    expect([...CLERK_TOOL_DENY]).toEqual(expect.arrayContaining(builtins));
+    expect(c.disallowedTools).toEqual(expect.arrayContaining(builtins));
+    expect(c.disallowedTools).not.toContain('mcp__claude_ai_Atlassian__*');
+    expect('tools' in c).toBe(false);
+    const other = build();
+    for (const t of ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'Agent', 'TodoWrite']) expect(other.disallowedTools).not.toContain(t);
   });
 
   it('denies connectors the npc is not equipped with', () => {

@@ -32,7 +32,7 @@ npm run dev
 npm start
 ```
 
-終端機會印出 `http://127.0.0.1:4517/?token=…`，用瀏覽器開這個網址。每次啟動都會產生新的 token，網址要整串打開；token 只在這個網址裡，不要分享出去。
+終端機會印出 `http://127.0.0.1:4517/?token=…`，用瀏覽器開這個網址。每次啟動都會產生新的 token，網址要整串打開；不要把這個網址分享出去。
 
 其他指令：`npm test`（全部測試）、`npm run typecheck`（型別檢查）。
 
@@ -59,10 +59,11 @@ LOC_DATA_DIR=/path/to/data npm start
 
 ## 安全注意事項
 
-- 伺服器只綁 `127.0.0.1`。所有 HTTP 與 WebSocket 都要驗 token、`Origin` 與 `Host`；頁面本身也只回應 loopback 的 Host（防 DNS rebinding）。
+- 伺服器只綁 `127.0.0.1`。API 與 WebSocket 需要 token；頁面本身不需要。所有 HTTP 與 WebSocket 都要驗 `Origin` 與 `Host`，頁面本身也只回應 loopback 的 Host（防 DNS rebinding）。
+- token 會出現在終端機輸出的網址裡，也會存在瀏覽器的 sessionStorage（開頁面後網址列上的 token 會被移除）。能看到你終端機或這個瀏覽器分頁的人就能操作遊戲。
 - NPC 在 Claude Code 的 auto mode 下執行，行為和你在同一個專案用 Claude Code auto mode 一樣：多數動作會自動放行，不會每次詢問，所以「信鴿」不常出現。遊戲永遠不會使用 `bypassPermissions`。
 - NPC 在獨立的 git worktree（獨立分支）裡工作，不會直接改你目前檢出的工作目錄。但這不是沙盒：auto mode 下的 NPC 仍可能執行 worktree 之外的 shell 指令（例如操作其他目錄的檔案），請只對你信任的專案與委託內容使用。
-- NPC 不能 `git push`（遊戲會封鎖 `git push`）。推上分支與開 PR 由遊戲在你按下「結算」時才做。
+- 推上分支與開 PR 應該由遊戲在你按下「結算」時才做。遊戲會封鎖 NPC 執行常見寫法的 `git push`、`gh pr` 與 `gh api` 指令，但這只是盡力而為：換個寫法（例如透過別的指令、腳本或別名間接執行）仍可能繞過封鎖。worktree 也不是沙盒。
 - 「唯讀」的 NPC 只是封鎖 Edit、Write 與 NotebookEdit 工具。它仍然能用 shell 指令（例如重新導向或 `sed -i`）寫檔，所以「唯讀」不是強制的安全邊界。需要真正隔離時，請不要把敏感專案派給它。
 - NPC 的所有用量都計入你的 claude.ai 訂閱額度。
 - 資料夾內的冒險日誌可能包含程式碼與機密，遊戲建立的資料夾與檔案只有你自己能讀寫。
