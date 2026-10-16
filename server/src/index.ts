@@ -8,6 +8,7 @@ import { ChatService } from './chats/service.js';
 import { ClerkService } from './clerk/clerk.js';
 import { loadConfig } from './config.js';
 import { createApp } from './http/app.js';
+import { clientDirWarning } from './http/static.js';
 import { ensureSeedNpcs } from './npcs/seeds.js';
 import { runPreflight, sdkEnv } from './preflight.js';
 import { PreflightState } from './preflightState.js';
@@ -22,6 +23,8 @@ const config = loadConfig();
 const serveClient = process.env['LOC_SERVE_CLIENT'] === '1';
 const clientDir = serveClient ? fileURLToPath(new URL('../../client/dist', import.meta.url)) : undefined;
 const publicPort = serveClient ? config.port : config.clientPort;
+const missingClient = clientDir ? clientDirWarning(clientDir) : undefined;
+if (missingClient) console.warn(`[前端] ${missingClient}`);
 const repos = makeRepos(config.dataDir);
 await ensureSeedNpcs(repos);
 

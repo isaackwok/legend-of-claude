@@ -12,6 +12,7 @@ import {
   commitIfDirty,
   createWorktree,
   diffStat,
+  nonInteractiveGit,
   pushBranch,
   worktreeExists,
 } from './worktree.js';
@@ -204,6 +205,38 @@ describe('pushBranch', () => {
   it("surfaces git's stderr when the push fails", async () => {
     const { worktreePath } = await createWorktree(repo, dataDir, 'loc/p2'); // no origin configured
     await expect(pushBranch(worktreePath, 'loc/p2')).rejects.toThrow(/origin/);
+  });
+});
+
+describe('nonInteractiveGit', () => {
+  // Isolated from the developer's own git config (which may set core.sshCommand).
+  const base = { PATH: process.env['PATH'], GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+
+  it('never prompts and uses ssh in batch mode when nothing configures ssh', async () => {
+    const { args, env } = await nonInteractiveGit(repo, base);
+    expect(args).toEqual([]);
+    expect(env['GIT_TERMINAL_PROMPT']).toBe('0');
+    expect(env['GIT_SSH_COMMAND']).toBe('ssh -o BatchMode=yes');
+  });
+
+  it('keeps an existing GIT_SSH_COMMAND and appends batch mode', async () => {
+    const { args, env } = await nonInteractiveGit(repo, { ...base, GIT_SSH_COMMAND: 'ssh -i ~/.ssh/k' });
+    expect(args).toEqual([]);
+    expect(env['GIT_SSH_COMMAND']).toBe('ssh -i ~/.ssh/k -o BatchMode=yes');
+    expect(env['GIT_TERMINAL_PROMPT']).toBe('0');
+  });
+
+  it('keeps a configured core.sshCommand (the key it names) and appends batch mode via -c', async () => {
+    await git(repo, 'config', 'core.sshCommand', 'ssh -i ~/.ssh/me -o IdentitiesOnly=yes');
+    const { args, env } = await nonInteractiveGit(repo, base);
+    expect(args).toEqual(['-c', 'core.sshCommand=ssh -i ~/.ssh/me -o IdentitiesOnly=yes -o BatchMode=yes']);
+    expect(env['GIT_SSH_COMMAND']).toBeUndefined();
+    expect(env['GIT_TERMINAL_PROMPT']).toBe('0');
+  });
+
+  it('leaves GIT_SSH alone and does not repeat batch mode', async () => {
+    expect((await nonInteractiveGit(repo, { ...base, GIT_SSH: '/usr/bin/my-ssh' })).env['GIT_SSH_COMMAND']).toBeUndefined();
+    expect((await nonInteractiveGit(repo, { ...base, GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' })).env['GIT_SSH_COMMAND']).toBe('ssh -o BatchMode=yes');
   });
 });
 

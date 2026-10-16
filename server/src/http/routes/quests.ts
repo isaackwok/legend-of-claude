@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { QuestSource } from '@loc/shared';
+import { ISSUE_KEY } from '../../clerk/clerk.js';
 import type { CreateQuestInput, QuestService } from '../../quests/service.js';
 import { BAD_REQUEST, errorResponse, jsonBody } from './helpers.js';
 
@@ -9,7 +10,8 @@ function parseSource(v: unknown): QuestSource | undefined | 'invalid' {
   if (v === undefined) return undefined;
   const s = v as Partial<{ kind: unknown; key: unknown; url: unknown }> | null;
   if (s?.kind === 'local') return { kind: 'local' };
-  if (s?.kind === 'jira' && isString(s.key) && s.key && isString(s.url)) return { kind: 'jira', key: s.key, url: s.url };
+  // Same key rule as the clerk: the key later flows into clerk prompts at settlement.
+  if (s?.kind === 'jira' && isString(s.key) && ISSUE_KEY.test(s.key) && isString(s.url)) return { kind: 'jira', key: s.key, url: s.url };
   return 'invalid';
 }
 

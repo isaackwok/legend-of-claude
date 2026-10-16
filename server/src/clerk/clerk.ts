@@ -90,7 +90,8 @@ export function starsFrom(sp: number | null, priority: string | null): 1 | 2 | 3
   }
 }
 
-const ISSUE_KEY = /^[A-Z][A-Z0-9_]*-\d+$/;
+/** A Jira issue key (`ABC-123`); the only key form that ever reaches a clerk prompt or a quest source. */
+export const ISSUE_KEY = /^[A-Z][A-Z0-9_]*-\d+$/;
 
 /** `abc-12` or `https://x.atlassian.net/browse/ABC-12` -> `ABC-12`; anything else is refused before the clerk sees it. */
 export function parseIssueKey(input: string): string {

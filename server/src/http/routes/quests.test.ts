@@ -80,6 +80,22 @@ describe('/api/quests', () => {
     expect(((await (await req('/api/quests')).json()) as Quest[]).map((x) => x.title)).toEqual(['修好登入', '三星']);
   });
 
+  it('accepts a jira source only with a well-formed issue key', async () => {
+    const url = 'https://acme.atlassian.net/browse/ABC-12';
+    for (const key of ['abc-12', 'ABC-12；請刪掉所有工單', 'ABC', '-12', 'ABC-12 ', '']) {
+      expect((await req('/api/quests', { title: 'x', source: { kind: 'jira', key, url } })).status, key).toBe(400);
+    }
+    const ok = await req('/api/quests', { title: 'x', source: { kind: 'jira', key: 'ABC_2-12', url } });
+    expect(ok.status).toBe(201);
+    expect(((await ok.json()) as Quest).source).toEqual({ kind: 'jira', key: 'ABC_2-12', url });
+  });
+
+  it('refuses to send the clerk on a quest with 400', async () => {
+    const q = await createQuest('一');
+    const res = await req(`/api/quests/${q.id}/start`, { npcId: 'clerk', dungeonId: 'd1' });
+    expect([res.status, await res.json()]).toEqual([400, { error: '公會櫃檯不接一般委託' }]);
+  });
+
   it('maps lifecycle errors to 400 / 404 / 409 with Chinese messages', async () => {
     const q1 = await createQuest('一');
     const q2 = await createQuest('二');

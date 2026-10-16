@@ -1,4 +1,5 @@
-import { readFile, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import type { MiddlewareHandler } from 'hono';
 import type { Config } from '../config.js';
@@ -24,22 +25,42 @@ const MIME: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-/** Resolves a request path to a regular file strictly inside root, or null (traversal, NUL, directories, missing). */
+const isInside = (root: string, file: string) => file === root || file.startsWith(root + sep);
+const hasDotSegment = (path: string) => path.split('/').some((segment) => segment.startsWith('.'));
+function safeDecode(path: string): string | undefined {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Resolves a request path to a regular file strictly inside root, or null: NUL or backslash, any
+ * segment starting with '.' (`..`, `.`, dotfiles), directories, missing files, and — after resolving
+ * symlinks on both sides — anything whose real path leaves the real root.
+ */
 async function resolveInside(root: string, rawPath: string): Promise<string | null> {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(rawPath);
-  } catch {
-    return null;
-  }
+  const decoded = safeDecode(rawPath);
+  if (decoded === undefined) return null;
   if (decoded.includes('\0') || decoded.includes('\\')) return null;
+  if (hasDotSegment(decoded)) return null;
   const file = resolve(root, `.${decoded}`);
-  if (file !== root && !file.startsWith(root + sep)) return null;
+  if (!isInside(root, file)) return null;
   try {
-    return (await stat(file)).isFile() ? file : null;
+    const realRoot = await realpath(root);
+    const realFile = await realpath(file);
+    if (!isInside(realRoot, realFile)) return null;
+    return (await stat(realFile)).isFile() ? realFile : null;
   } catch {
     return null;
   }
+}
+
+/** A startup warning when `dir` has no built client (`npm start` builds it first). */
+export function clientDirWarning(dir: string): string | undefined {
+  if (existsSync(join(dir, 'index.html'))) return undefined;
+  return `找不到前端建置檔 ${join(dir, 'index.html')}，頁面會是 404。請先執行 npm run build -w @loc/client（npm start 會自動建置）。`;
 }
 
 /**
@@ -53,18 +74,23 @@ export function staticClient(dir: string, config: Pick<Config, 'port' | 'clientP
     if (path === '/api' || path.startsWith('/api/') || path === '/ws' || path.startsWith('/ws/')) return next();
     if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return next();
     if (!hostAllowed(c.req.header('Host'), config)) return c.json({ error: 'forbidden host' }, 403);
+    // Dotfiles and dot directories are never served, not even as a client-side route.
+    if (hasDotSegment(safeDecode(path) ?? path)) return c.text('Not Found', 404);
     let file = await resolveInside(root, path);
+    let fallback = false;
     if (!file) {
       // A missing asset (has an extension) is a real 404; any other path is a client-side route.
       if (extname(path) !== '') return c.text('Not Found', 404);
       file = await resolveInside(root, '/index.html');
       if (!file) return c.text('Not Found', 404);
+      fallback = true;
     }
-    const isIndex = file === join(root, 'index.html');
+    // Only Vite's content-hashed bundles under /assets/ may be cached forever.
+    const immutable = !fallback && path.startsWith('/assets/');
     const body = await readFile(file);
     return c.body(new Uint8Array(body), 200, {
       'Content-Type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
-      'Cache-Control': isIndex ? 'no-cache' : 'public, max-age=31536000, immutable',
+      'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
       'X-Content-Type-Options': 'nosniff',
     });
   };

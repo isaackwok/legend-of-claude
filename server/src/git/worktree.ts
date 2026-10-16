@@ -27,22 +27,29 @@ interface GitResult {
   stderr: string;
 }
 
+/** The git subcommand for messages, skipping leading `-c key=value` options. */
+function subcommand(args: string[]): string | undefined {
+  let i = 0;
+  while (args[i] === '-c') i += 2;
+  return args[i];
+}
+
 /** Runs git without a shell; never rejects on a non-zero exit (only on spawn failure/timeout, with stderr attached). */
-function runGit(cwd: string, args: string[], timeout = GIT_TIMEOUT_MS): Promise<GitResult> {
+function runGit(cwd: string, args: string[], timeout = GIT_TIMEOUT_MS, env?: NodeJS.ProcessEnv): Promise<GitResult> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, timeout, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile('git', args, { cwd, timeout, maxBuffer: 16 * 1024 * 1024, ...(env ? { env } : {}) }, (err, stdout, stderr) => {
       if (!err) return resolve({ code: 0, stdout, stderr });
       const e = err as Error & { code?: number | string };
       if (typeof e.code === 'number') return resolve({ code: e.code, stdout, stderr });
-      reject(new Error(`git ${args[0]} 執行失敗：${stderr.trim() || e.message}`));
+      reject(new Error(`git ${subcommand(args)} 執行失敗：${stderr.trim() || e.message}`));
     });
   });
 }
 
 /** Runs git and throws (including git's stderr) on a non-zero exit. */
-async function git(cwd: string, args: string[], timeout = GIT_TIMEOUT_MS): Promise<string> {
-  const r = await runGit(cwd, args, timeout);
-  if (r.code !== 0) throw new Error(`git ${args[0]} 失敗：${r.stderr.trim() || r.stdout.trim() || `exit ${r.code}`}`);
+async function git(cwd: string, args: string[], timeout = GIT_TIMEOUT_MS, env?: NodeJS.ProcessEnv): Promise<string> {
+  const r = await runGit(cwd, args, timeout, env);
+  if (r.code !== 0) throw new Error(`git ${subcommand(args)} 失敗：${r.stderr.trim() || r.stdout.trim() || `exit ${r.code}`}`);
   return r.stdout;
 }
 
@@ -115,8 +122,29 @@ export async function diffStat(worktreePath: string, baseBranch: string): Promis
   return git(worktreePath, ['diff', '--stat', `${baseBranch}...HEAD`]);
 }
 
+const BATCH_MODE = '-o BatchMode=yes';
+const withBatchMode = (sshCommand: string) => (/BatchMode/i.test(sshCommand) ? sshCommand : `${sshCommand} ${BATCH_MODE}`);
+
+/**
+ * Leading args and env for git commands that reach the network: the server has no terminal, so git
+ * must fail instead of asking for a password or passphrase. The user's own ssh setup is kept: an
+ * existing GIT_SSH_COMMAND or core.sshCommand (e.g. naming a key) gets batch mode appended; only when
+ * neither (nor GIT_SSH) is set does this supply `ssh -o BatchMode=yes`.
+ */
+export async function nonInteractiveGit(cwd: string, env: NodeJS.ProcessEnv = process.env): Promise<{ args: string[]; env: NodeJS.ProcessEnv }> {
+  const out: NodeJS.ProcessEnv = { ...env, GIT_TERMINAL_PROMPT: '0' };
+  const fromEnv = env['GIT_SSH_COMMAND'];
+  if (fromEnv) return { args: [], env: { ...out, GIT_SSH_COMMAND: withBatchMode(fromEnv) } };
+  const configured = await runGit(cwd, ['config', '--get', 'core.sshCommand'], GIT_TIMEOUT_MS, env);
+  const sshCommand = configured.code === 0 ? configured.stdout.trim() : '';
+  if (sshCommand) return { args: ['-c', `core.sshCommand=${withBatchMode(sshCommand)}`], env: out };
+  if (!env['GIT_SSH']) out['GIT_SSH_COMMAND'] = `ssh ${BATCH_MODE}`;
+  return { args: [], env: out };
+}
+
 export async function pushBranch(worktreePath: string, branch: string): Promise<void> {
-  await git(worktreePath, ['push', '-u', 'origin', branch], PUSH_TIMEOUT_MS);
+  const { args, env } = await nonInteractiveGit(worktreePath);
+  await git(worktreePath, [...args, 'push', '-u', 'origin', branch], PUSH_TIMEOUT_MS, env);
 }
 
 export async function worktreeExists(path: string): Promise<boolean> {

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -13,6 +13,7 @@ import { buildSnapshot } from '../snapshot.js';
 import { FileSessionStore } from '../store/fileSessionStore.js';
 import { repos as makeRepos } from '../store/jsonRepo.js';
 import { createApp } from './app.js';
+import { clientDirWarning, staticClient } from './static.js';
 
 const preflight: Preflight = { ignoredEnvVars: [], loggedIn: true, warnings: [] };
 const INDEX = '<!doctype html><title>fake client</title><div id="root"></div>';
@@ -107,6 +108,60 @@ describe('static client (production mode)', () => {
       expect(text, path).not.toContain(SECRET);
     }
     expect((await app('/..%2f..%2fpackage.json')).status).toBe(404);
+  });
+
+  it('does not follow a symlink out of the dist folder', async () => {
+    await symlink(join(dir, 'package.json'), join(distDir, 'assets', 'leak.js'));
+    await symlink(dir, join(distDir, 'assets', 'up'));
+    const app = makeApp();
+    for (const path of ['/assets/leak.js', '/assets/up/package.json']) {
+      const res = await app(path);
+      expect(res.status, path).toBe(404);
+      expect(await res.text(), path).not.toContain(SECRET);
+    }
+  });
+
+  it('refuses dotfiles and dot directories', async () => {
+    await writeFile(join(distDir, '.env'), SECRET);
+    await mkdir(join(distDir, '.git'));
+    await writeFile(join(distDir, '.git', 'config'), SECRET);
+    await writeFile(join(distDir, 'assets', '.secret.js'), SECRET);
+    const app = makeApp();
+    for (const path of ['/.env', '/.git/config', '/assets/.secret.js', '/%2eenv']) {
+      const res = await app(path);
+      expect(await res.text(), path).not.toContain(SECRET);
+    }
+    expect((await app('/.env')).status).toBe(404);
+  });
+
+  it('refuses a raw ../ path that never went through URL normalization', async () => {
+    const handler = staticClient(distDir, config);
+    for (const path of ['/../package.json', '/assets/../../package.json', '/..']) {
+      const c = {
+        req: { path, method: 'GET', header: (name: string) => (name === 'Host' ? '127.0.0.1:4517' : undefined) },
+        text: (body: string, status: number) => new Response(body, { status }),
+        json: (body: unknown, status: number) => new Response(JSON.stringify(body), { status }),
+        body: (data: Uint8Array, status: number, headers: Record<string, string>) => new Response(data, { status, headers }),
+      };
+      const res = (await handler(c as never, async () => undefined)) as Response;
+      expect(await res.text(), path).not.toContain(SECRET);
+    }
+  });
+
+  it('marks only /assets/ files immutable; other files and index.html are revalidated', async () => {
+    await writeFile(join(distDir, 'favicon.svg'), '<svg/>');
+    const app = makeApp();
+    expect((await app('/assets/app.js')).headers.get('cache-control')).toContain('immutable');
+    expect((await app('/favicon.svg')).headers.get('cache-control')).toBe('no-cache');
+    expect((await app('/')).headers.get('cache-control')).toBe('no-cache');
+    expect((await app('/index.html')).headers.get('cache-control')).toBe('no-cache');
+  });
+
+  it('warns when the built client is missing', async () => {
+    expect(clientDirWarning(distDir)).toBeUndefined();
+    const warning = clientDirWarning(join(dir, 'no-dist'));
+    expect(warning).toContain('index.html');
+    expect(warning).toContain('npm run build');
   });
 
   it('serves nothing when no clientDir is configured (dev mode)', async () => {
