@@ -33,7 +33,7 @@ afterEach(async () => {
 function makeApp() {
   const repos = makeRepos(dir);
   const getSnapshot = () => buildSnapshot(repos, preflight);
-  return { repos, getSnapshot, app: createApp({ config, repos, getSnapshot, getPreflight: () => preflight }) };
+  return { repos, getSnapshot, app: createApp({ config, repos, hub: { broadcast: () => undefined }, getSnapshot, getPreflight: () => preflight }) };
 }
 
 const HOST = '127.0.0.1:4517';

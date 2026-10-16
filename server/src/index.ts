@@ -17,8 +17,8 @@ let preflight: Preflight = { ignoredEnvVars: sdkEnv().ignored, loggedIn: true, w
 const getPreflight = () => preflight;
 const getSnapshot = () => buildSnapshot(repos, preflight);
 
-const app = createApp({ config, repos, getSnapshot, getPreflight });
 const hub = new WsHub(getSnapshot);
+const app = createApp({ config, repos, hub, getSnapshot, getPreflight });
 
 const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: config.port }, () => {
   console.log(`克勞德傳說已啟動：http://127.0.0.1:${config.clientPort}/?token=${config.token}`);

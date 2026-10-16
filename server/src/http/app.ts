@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
-import type { Preflight, Snapshot } from '@loc/shared';
+import type { Preflight, ServerMessage, Snapshot } from '@loc/shared';
 import type { Config } from '../config.js';
 import type { Repos } from '../store/jsonRepo.js';
+import { dungeonRoutes } from './routes/dungeons.js';
 import { preflightRoutes } from './routes/preflight.js';
 import { requireAuth, requireHost } from './security.js';
 
@@ -9,6 +10,7 @@ import { requireAuth, requireHost } from './security.js';
 export interface AppDeps {
   config: Config;
   repos: Repos;
+  hub: { broadcast(msg: ServerMessage): void };
   getSnapshot: () => Promise<Snapshot>;
   getPreflight: () => Preflight;
 }
@@ -19,6 +21,7 @@ export function createApp(deps: AppDeps): Hono {
   api.use('*', requireHost(deps.config));
   api.use('*', requireAuth(deps.config));
   api.route('/preflight', preflightRoutes(deps.getPreflight));
+  api.route('/dungeons', dungeonRoutes({ repos: deps.repos, hub: deps.hub }));
   app.route('/api', api);
   return app;
 }
