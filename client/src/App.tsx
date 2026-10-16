@@ -4,13 +4,17 @@ import { api, getToken } from './api/http';
 import { connectWs } from './api/ws';
 import { useGame } from './state/store';
 import { ConnectionBanner } from './ui/ConnectionBanner';
+import { Nav } from './ui/Nav';
 import { Preflight } from './ui/Preflight';
+import { Board } from './ui/board/Board';
+import { DungeonsPanel } from './ui/dungeons/DungeonsPanel';
 
 // Read once at load: getToken() also moves the token from the URL into sessionStorage.
 const hasToken = getToken() !== '';
 
 export function App() {
   const preflight = useGame((s) => s.preflight);
+  const panel = useGame((s) => s.ui.panel);
 
   useEffect(() => {
     if (!hasToken) return;
@@ -40,7 +44,13 @@ export function App() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <ConnectionBanner />
       <Preflight preflight={preflight} />
-      <main className="frame" style={{ flex: 1, margin: 16 }} />
+      <Nav />
+      <main style={{ flex: 1, margin: 16, overflow: 'auto' }}>
+        {panel === 'board' && <Board />}
+        {/* Crystal panel arrives in Task 15; 退回 dialog wiring (Board onReject) in Task 16. */}
+        {panel === 'crystal' && <div>水晶球（建置中）</div>}
+        {panel === 'dungeons' && <DungeonsPanel />}
+      </main>
     </div>
   );
 }
