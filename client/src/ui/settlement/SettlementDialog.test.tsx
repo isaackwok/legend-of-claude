@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Quest, SettlementRecord } from '@loc/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialState, useGame } from '../../state/store';
@@ -139,6 +139,83 @@ describe('SettlementDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '結算' }));
     await screen.findByRole('button', { name: '關閉' });
     expect(openSpy).toHaveBeenCalledWith('https://example.atlassian.net/browse/LOC-7', '_blank', 'noopener');
+  });
+
+  it('also renders an 開啟 Jira 票 link on the results screen when the ticket was chosen', async () => {
+    mockFetch((path) => (path.endsWith('/settle') ? { body: record({ prUrl: undefined }) } : { body: OPTIONS_JIRA }));
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    open(jiraQuest());
+    await screen.findByLabelText('推上分支並開 PR');
+    fireEvent.click(screen.getByLabelText('在瀏覽器打開這張 Jira 票'));
+    fireEvent.click(screen.getByRole('button', { name: '結算' }));
+    await screen.findByRole('button', { name: '關閉' });
+    const link = screen.getByRole('link', { name: '開啟 Jira 票' }) as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('https://example.atlassian.net/browse/LOC-7');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('shows no ticket link when the ticket was not chosen', async () => {
+    mockFetch((path) => (path.endsWith('/settle') ? { body: record({ prUrl: undefined }) } : { body: OPTIONS_JIRA }));
+    open(jiraQuest());
+    await screen.findByLabelText('推上分支並開 PR');
+    fireEvent.click(screen.getByRole('button', { name: '結算' }));
+    await screen.findByRole('button', { name: '關閉' });
+    expect(screen.queryByRole('link')).toBeNull();
+  });
+
+  it('rejects non-http URLs: no window.open, no ticket link, no PR anchor', async () => {
+    mockFetch((path) => (path.endsWith('/settle') ? { body: record({ prUrl: 'javascript:alert(2)' }) } : { body: OPTIONS_JIRA }));
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    open(jiraQuest({ source: { kind: 'jira', key: 'LOC-7', url: 'javascript:alert(1)' } }));
+    await screen.findByLabelText('推上分支並開 PR');
+    fireEvent.click(screen.getByLabelText('在瀏覽器打開這張 Jira 票'));
+    fireEvent.click(screen.getByRole('button', { name: '結算' }));
+    await screen.findByRole('button', { name: '關閉' });
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(screen.queryByRole('link')).toBeNull();
+  });
+
+  it('disables 結算 and explains when the quest is no longer in review', async () => {
+    mockFetch(() => ({ body: OPTIONS_JIRA }));
+    open(jiraQuest());
+    await screen.findByLabelText('推上分支並開 PR');
+    expect((screen.getByRole('button', { name: '結算' }) as HTMLButtonElement).disabled).toBe(false);
+    act(() => useGame.setState({ quests: { j: jiraQuest({ status: 'done' }) } }));
+    expect(screen.getByText('這個委託已結算或不在待驗收狀態')).toBeTruthy();
+    expect((screen.getByRole('button', { name: '結算' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('keeps the results visible when the quest turns done while settling', async () => {
+    let release: (r: Reply) => void = () => undefined;
+    const pending = new Promise<Reply>((resolve) => (release = resolve));
+    mockFetch((path) => (path.endsWith('/settle') ? pending : { body: OPTIONS_JIRA }));
+    open(jiraQuest());
+    await screen.findByLabelText('推上分支並開 PR');
+    fireEvent.click(screen.getByRole('button', { name: '結算' }));
+    await screen.findByText('公會櫃檯正在結算…');
+    act(() => useGame.setState({ quests: { j: jiraQuest({ status: 'done' }) } }));
+    expect(screen.queryByText('這個委託已結算或不在待驗收狀態')).toBeNull();
+    release({ body: record() });
+    await screen.findByRole('button', { name: '關閉' });
+  });
+
+  it('hints and disables 結算 when the comment is checked but blank', async () => {
+    mockFetch(() => ({ body: OPTIONS_JIRA }));
+    open(jiraQuest({ scroll: '' }));
+    await screen.findByLabelText('推上分支並開 PR');
+    fireEvent.click(screen.getByLabelText('在 Jira 留言'));
+    expect(screen.getByText('留言內容不可空白')).toBeTruthy();
+    expect((screen.getByRole('button', { name: '結算' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('留言內容'), { target: { value: '內容' } });
+    expect(screen.queryByText('留言內容不可空白')).toBeNull();
+    expect((screen.getByRole('button', { name: '結算' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('treats lastChoices: null like no lastChoices', async () => {
+    mockFetch(() => ({ body: { ...OPTIONS_JIRA, lastChoices: null } }));
+    open(jiraQuest());
+    expect(((await screen.findByLabelText('推上分支並開 PR')) as HTMLInputElement).checked).toBe(true);
   });
 
   it('does not open the ticket when the settle request fails', async () => {

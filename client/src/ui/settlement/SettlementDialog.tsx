@@ -7,7 +7,7 @@ import { Modal } from '../Modal';
 interface SettlementOptions {
   isJira: boolean;
   transitions: { id: string; name: string }[];
-  lastChoices?: SettlementChoices;
+  lastChoices?: SettlementChoices | null;
 }
 
 interface FormState {
@@ -56,6 +56,7 @@ export function SettlementDialog({ questId }: { questId: string }) {
   const [form, setForm] = useState<FormState>({ pushAndPr: true, transitionId: '', commentOn: false, comment: '', linkPr: false, openTicket: false });
   const [error, setError] = useState<string>();
   const [record, setRecord] = useState<SettlementRecord>();
+  const [ticketChosen, setTicketChosen] = useState(false);
   const busyRef = useRef(false);
 
   const source = quest?.source;
@@ -103,9 +104,10 @@ export function SettlementDialog({ questId }: { questId: string }) {
   const patch = (p: Partial<FormState>) => setForm((f) => ({ ...f, ...p }));
   const settling = phase === 'settling';
   const commentBlank = jiraOps && form.commentOn && form.comment.trim() === '';
+  const notInReview = quest.status !== 'review' && (phase === 'loading' || phase === 'ready');
 
   const settle = async () => {
-    if (busyRef.current || phase !== 'ready' || commentBlank) return;
+    if (busyRef.current || phase !== 'ready' || commentBlank || notInReview) return;
     busyRef.current = true;
     setPhase('settling');
     setError(undefined);
@@ -119,9 +121,11 @@ export function SettlementDialog({ questId }: { questId: string }) {
     try {
       const result = await api<SettlementRecord>(`/quests/${quest.id}/settle`, { method: 'POST', body: JSON.stringify(choices) });
       if (choices.openTicket && source?.kind === 'jira') {
+        // Likely popup-blocked after the long await, so the results screen also shows a link.
         const url = safeHttpUrl(source.url);
         if (url) window.open(url, '_blank', 'noopener');
       }
+      setTicketChosen(choices.openTicket);
       setRecord(result);
       setPhase('done');
     } catch (err) {
@@ -134,6 +138,7 @@ export function SettlementDialog({ questId }: { questId: string }) {
 
   if (phase === 'done' && record) {
     const prUrl = safeHttpUrl(record.prUrl);
+    const ticketUrl = ticketChosen && source?.kind === 'jira' ? safeHttpUrl(source.url) : undefined;
     return (
       <Modal title={`結算結果：${quest.title}`} onClose={close}>
         <div className="form">
@@ -147,6 +152,11 @@ export function SettlementDialog({ questId }: { questId: string }) {
           {prUrl && (
             <p>
               <a href={prUrl} target="_blank" rel="noopener noreferrer">查看 PR</a>
+            </p>
+          )}
+          {ticketUrl && (
+            <p>
+              <a href={ticketUrl} target="_blank" rel="noopener noreferrer">開啟 Jira 票</a>
             </p>
           )}
           <div className="form-actions">
@@ -206,10 +216,12 @@ export function SettlementDialog({ questId }: { questId: string }) {
             )}
           </>
         )}
+        {notInReview && <p role="alert" className="form-error">這個委託已結算或不在待驗收狀態</p>}
+        {commentBlank && <p className="form-error">留言內容不可空白</p>}
         {settling && <p role="status">公會櫃檯正在結算…</p>}
         {error && <p role="alert" className="form-error">{error}</p>}
         <div className="form-actions">
-          <button type="submit" className="primary" disabled={phase !== 'ready' || commentBlank}>結算</button>
+          <button type="submit" className="primary" disabled={phase !== 'ready' || commentBlank || notInReview}>結算</button>
           <button type="button" className="quiet" onClick={close} disabled={settling}>取消</button>
         </div>
       </form>
