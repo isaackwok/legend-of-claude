@@ -234,13 +234,16 @@ export class AgentRun {
         if (msg.type === 'result') {
           this.sessionId ||= msg.session_id;
           costUsd = msg.total_cost_usd ?? costUsd;
+          const queued = !!(msg.queued_turn_count && msg.queued_turn_count > 0);
           if (!this.recalled) {
             this.emit(msg);
             outcome = this.outcomeOf(msg);
+            // Frozen at recall: a terminal interruption result arriving after interrupt() must not
+            // clear it, or the earlier turn's success would win over the recall.
+            turnPending = queued;
           }
           // One prompt, one result: unless more user sends are already queued, let the query finish.
-          turnPending = !!(msg.queued_turn_count && msg.queued_turn_count > 0);
-          if (!turnPending) this.input.end();
+          if (!queued) this.input.end();
           continue;
         }
         if (!this.recalled) this.emit(msg);

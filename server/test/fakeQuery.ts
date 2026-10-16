@@ -26,6 +26,11 @@ export interface FakeQueryOptions {
   mcpServerStatus?: Array<McpServerStatus[] | Error | 'hang'>;
   /** `'hang'`: `initializationResult()` never answers. */
   initializationResult?: 'hang';
+  /**
+   * Messages yielded once after `interrupt()` before the stream ends, like the real SDK's terminal
+   * interruption result. Default: none (the stream stops at once).
+   */
+  afterInterrupt?: FakeMessageStep[];
 }
 
 export interface FakeQuery {
@@ -75,9 +80,15 @@ export function fakeQuery(script: FakeStep[], fakeOptions: FakeQueryOptions = {}
         notify();
       })();
     }
+    async function* tail() {
+      if (state.interrupted && !state.closed) yield* fakeOptions.afterInterrupt ?? [];
+    }
     async function* gen() {
       for (const step of script) {
-        if (stopped()) return;
+        if (stopped()) {
+          yield* tail();
+          return;
+        }
         if (isCanUseToolStep(step)) {
           const s = step.canUseTool;
           const canUseTool = options.canUseTool as CanUseTool;
@@ -100,6 +111,7 @@ export function fakeQuery(script: FakeStep[], fakeOptions: FakeQueryOptions = {}
           yield step;
         }
       }
+      if (stopped()) yield* tail();
     }
     const q = gen() as unknown as Query;
     Object.assign(q, {

@@ -121,6 +121,15 @@ describe('AgentRun', () => {
     expect(await run.done).toMatchObject({ ok: false, errors: ['已被召回'] });
   });
 
+  it('a recall during a queued follow-up stays recalled when the SDK then emits an interruption result', async () => {
+    const queued = { ...success, result: 'first turn completed', queued_turn_count: 1 };
+    const interruption = { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['interrupted'], terminal_reason: 'aborted_streaming', queued_turn_count: 0, total_cost_usd: 0.3, session_id: 's-1' };
+    const { events, run } = start([init, queued, { waitForInput: 99 }], {}, { afterInterrupt: [interruption] });
+    await vi.waitFor(() => expect(events.some((e) => e.kind === 'result')).toBe(true));
+    await run.recall();
+    expect(await run.done).toMatchObject({ ok: false, errors: ['已被召回'] });
+  });
+
   it('a queued follow-up turn that finishes replaces the earlier result', async () => {
     const queued = { ...success, result: '第一輪', queued_turn_count: 1 };
     const { run } = start([init, queued, { ...success, result: '第二輪' }]);
