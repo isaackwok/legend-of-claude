@@ -9,7 +9,7 @@ import { branchName, commitIfDirty, createWorktree, diffStat, worktreeExists } f
 import { sdkEnv } from '../preflight.js';
 import type { Repos } from '../store/jsonRepo.js';
 import { getSettings } from '../store/settings.js';
-import { CONTINUE_PREFIX, questPrompt, rejectPrompt } from './prompts.js';
+import { CONTINUE_PROMPT, handoverBrief, questBrief, questInstructions, rejectPrompt } from './prompts.js';
 
 export const INTERRUPTED_BY_RESTART = '冒險被中斷（伺服器重啟）';
 const QUEST_BUSY = '這個委託正在進行中，請先召回';
@@ -127,7 +127,10 @@ export class QuestService {
     return quest;
   }
 
-  /** 出發. A quest that already has a worktree (after 召回 / restart) reuses it and resumes its session. */
+  /**
+   * 出發. A quest that already has a worktree (after 召回 / restart) reuses it: the same NPC resumes its
+   * session; a different NPC starts a fresh one with the brief and the earlier scroll (R26).
+   */
   async start(questId: string, target: { npcId: string; dungeonId: string }): Promise<Quest> {
     const { npcId, dungeonId } = target;
     // Both claims happen before the first await: a double click must not open two sessions.
@@ -144,11 +147,10 @@ export class QuestService {
 
       if (quest.worktreePath && (await worktreeExists(quest.worktreePath))) {
         if (quest.dungeonId && quest.dungeonId !== dungeonId) throw new ValidationError('這個委託已在另一座地下城開始過，請選原本的地下城');
-        const briefing = questPrompt(quest, dungeon);
-        const resume = quest.sessionId;
-        return await this.launch(quest, npc, dungeon, {
+        const resume = quest.npcId === npc.id ? quest.sessionId : undefined;
+        return await this.launch(quest, npc, {
           action: 'start',
-          prompt: resume ? `${CONTINUE_PREFIX}\n\n${briefing}` : briefing,
+          prompt: resume ? CONTINUE_PROMPT : handoverBrief(quest, dungeon),
           ...(resume ? { resume } : {}),
           patch: { dungeonId },
         });
@@ -156,10 +158,9 @@ export class QuestService {
 
       const branch = branchName(quest);
       const { worktreePath, baseBranch } = await createWorktree(dungeon.path, this.deps.dataDir, branch);
-      const placed = { ...quest, branch, worktreePath, baseBranch, dungeonId };
-      return await this.launch(quest, npc, dungeon, {
+      return await this.launch(quest, npc, {
         action: 'start',
-        prompt: questPrompt(placed, dungeon),
+        prompt: questBrief(quest, dungeon),
         patch: { branch, worktreePath, baseBranch, dungeonId },
       });
     } catch (err) {
@@ -201,12 +202,12 @@ export class QuestService {
         throw new ConflictError('這個委託沒有可續用的冒險紀錄');
       }
       const npc = await this.mustGetNpc(quest.npcId);
-      const dungeon = await this.mustGetDungeon(quest.dungeonId);
+      await this.mustGetDungeon(quest.dungeonId);
       // Checked and claimed in one synchronous step.
       if (this.busyNpcs.has(npc.id) || npc.busyQuestId) throw new NpcBusyError(npc.name);
       this.busyNpcs.set(npc.id, questId);
       claimedNpc = npc.id;
-      return await this.launch(quest, npc, dungeon, {
+      return await this.launch(quest, npc, {
         action: 'reject',
         prompt: rejectPrompt(text),
         resume: quest.sessionId,
@@ -248,19 +249,18 @@ export class QuestService {
     return this.settledRuns.get(questId) ?? Promise.resolve();
   }
 
-  private async launch(quest: Quest, npc: Npc, dungeon: Dungeon, params: LaunchParams): Promise<Quest> {
+  private async launch(quest: Quest, npc: Npc, params: LaunchParams): Promise<Quest> {
     const { repos, hub, broker, queryFn, sessionStore } = this.deps;
     const placed: Quest = { ...quest, ...params.patch };
-    const worktreePath = placed.worktreePath;
-    const baseBranch = placed.baseBranch;
-    if (!worktreePath || !baseBranch) throw new ConflictError('這個委託沒有工作目錄');
+    const { worktreePath, baseBranch, branch } = placed;
+    if (!worktreePath || !baseBranch || !branch) throw new ConflictError('這個委託沒有工作目錄');
 
     // Everything that can fail runs before any state is written.
     const settings = await getSettings(repos);
     const options = buildAgentOptions({
       npc,
       cwd: worktreePath,
-      appendPrompt: questPrompt(placed, dungeon),
+      appendPrompt: questInstructions(branch),
       allConnectorPrefixes: connectorPrefixesFrom(settings),
       sessionStore,
       env: this.deps.env ?? sdkEnv().env,
@@ -290,10 +290,12 @@ export class QuestService {
       (info) => this.onInit(started, npc, worktreePath, info),
       () => undefined,
     );
-    this.settledRuns.set(
-      quest.id,
-      run.done.then((outcome) => this.finish(started, npc.id, run, outcome, initHandled, { worktreePath, baseBranch })),
-    );
+    const settled: Promise<void> = run.done
+      .then((outcome) => this.finish(started, npc.id, run, outcome, initHandled, { worktreePath, baseBranch }))
+      .finally(() => {
+        if (this.settledRuns.get(quest.id) === settled) this.settledRuns.delete(quest.id);
+      });
+    this.settledRuns.set(quest.id, settled);
     return started;
   }
 
@@ -327,6 +329,7 @@ export class QuestService {
   ): Promise<void> {
     if (this.runs.get(quest.id) === run) this.runs.delete(quest.id);
     await initHandled;
+    let finished: Quest | undefined;
     try {
       let action: 'finish' | 'interrupt';
       let scroll: string;
@@ -338,13 +341,18 @@ export class QuestService {
         const errors = outcome.errors ?? [];
         scroll = errors.includes(RECALLED) ? RECALLED : `冒險失敗：${errors.join('；') || '未知原因'}`;
       }
-      await this.patchQuest(quest.id, (q) => ({
-        ...q,
-        status: transition(q.status, action),
-        scroll,
-        ...(outcome.sessionId && !q.sessionId ? { sessionId: outcome.sessionId } : {}),
-        updatedAt: Date.now(),
-      }));
+      // Broadcast only after the NPC and the claims are free, so a client reacting to it can start again.
+      finished = await this.patchQuest(
+        quest.id,
+        (q) => ({
+          ...q,
+          status: transition(q.status, action),
+          scroll,
+          ...(outcome.sessionId && !q.sessionId ? { sessionId: outcome.sessionId } : {}),
+          updatedAt: Date.now(),
+        }),
+        { broadcast: false },
+      );
       if (outcome.sessionId) await this.touchSession(outcome.sessionId, outcome.costUsd);
     } catch (err) {
       console.error(`[委託 ${quest.id}] 結束處理失敗：${errorText(err)}`);
@@ -355,6 +363,7 @@ export class QuestService {
         console.error(`[委託 ${quest.id}] 無法釋放冒險者：${errorText(err)}`);
       }
       this.release(quest.id, npcId);
+      if (finished) this.deps.hub.broadcast({ type: 'quest', quest: finished });
     }
   }
 
@@ -376,10 +385,13 @@ export class QuestService {
     return commitError ? appendLine(scroll, `自動提交失敗：${commitError}`) : scroll;
   }
 
-  /** R23: `costUsd` is the session's cumulative total, so the latest value replaces the stored one. */
+  /**
+   * R23: `costUsd` is the session's cumulative total, so it is never summed. A run without a result
+   * (recall, crash) reports 0, so the stored total only ever grows.
+   */
   private async touchSession(sessionId: string, costUsd: number): Promise<void> {
     const entry = await this.deps.repos.sessions.get(sessionId);
-    if (entry) await this.deps.repos.sessions.put({ ...entry, updatedAt: Date.now(), costUsd });
+    if (entry) await this.deps.repos.sessions.put({ ...entry, updatedAt: Date.now(), costUsd: Math.max(entry.costUsd ?? 0, costUsd) });
   }
 
   private release(questId: string, npcId: string | undefined): void {
@@ -393,15 +405,15 @@ export class QuestService {
     return result;
   }
 
-  /** Read-modify-write of one quest; broadcasts when `fn` returns a new object. */
-  private patchQuest(id: string, fn: (q: Quest) => Quest): Promise<Quest> {
+  /** Read-modify-write of one quest; broadcasts when `fn` returns a new object (unless told not to). */
+  private patchQuest(id: string, fn: (q: Quest) => Quest, opts: { broadcast?: boolean } = {}): Promise<Quest> {
     return this.serial(async () => {
       const current = await this.deps.repos.quests.get(id);
       if (!current) throw new NotFoundError('找不到這個委託');
       const next = fn(current);
       if (next === current) return current;
       await this.deps.repos.quests.put(next);
-      this.deps.hub.broadcast({ type: 'quest', quest: next });
+      if (opts.broadcast !== false) this.deps.hub.broadcast({ type: 'quest', quest: next });
       return next;
     });
   }

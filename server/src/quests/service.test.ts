@@ -14,7 +14,7 @@ import { createWorktree, worktreeExists } from '../git/worktree.js';
 import { seedNpcs } from '../npcs/seeds.js';
 import { FileSessionStore } from '../store/fileSessionStore.js';
 import { repos as makeRepos, type Repos } from '../store/jsonRepo.js';
-import { questPrompt } from './prompts.js';
+import { handoverBrief, questBrief, questInstructions } from './prompts.js';
 import { ConflictError, NotFoundError, NpcBusyError, QuestService, ValidationError } from './service.js';
 
 const run = promisify(execFile);
@@ -67,6 +67,12 @@ function writing(fn: QueryFn, file: string): QueryFn {
   }) as unknown as QueryFn;
 }
 
+/** Hands each query() call to the next fake (a fake's interrupted state is shared by all its calls). */
+function sequence(...fakes: QueryFn[]): QueryFn {
+  let i = 0;
+  return ((p: unknown) => (fakes[Math.min(i++, fakes.length - 1)] as unknown as (x: unknown) => unknown)(p)) as unknown as QueryFn;
+}
+
 const promptText = (m: { message: { content: unknown } } | undefined) => m?.message.content as string;
 
 describe('QuestService', () => {
@@ -95,11 +101,14 @@ describe('QuestService', () => {
     expect(opts.permissionMode).toBe('auto');
     expect(opts.resume).toBeUndefined();
     expect(opts.sessionStore).toBeInstanceOf(FileSessionStore);
-    expect((opts.systemPrompt as { append: string }).append).toContain(`loc/${q.id}`);
+    const append = (opts.systemPrompt as { append: string }).append;
+    expect(append).toContain(questInstructions(`loc/${q.id}`));
+    expect(append).not.toContain('登入按鈕沒反應');
     await svc.message(q.id, '記得補測試');
     await svc.settled(q.id);
 
-    expect(promptText(fake.inputs[0])).toBe(questPrompt(started, (await r.dungeons.get('d1'))!));
+    expect(promptText(fake.inputs[0])).toBe(questBrief(started, (await r.dungeons.get('d1'))!));
+    expect(promptText(fake.inputs[0])).not.toContain('你在獨立分支');
     expect(promptText(fake.inputs[1])).toBe('記得補測試');
     const done = (await r.quests.get(q.id))!;
     expect(done.status).toBe('review');
@@ -113,7 +122,8 @@ describe('QuestService', () => {
     expect(messages.some((m) => m.type === 'event' && m.event.kind === 'result' && m.event.questId === q.id)).toBe(true);
     expect(messages).toContainEqual({ type: 'quest', quest: done });
     expect(messages.some((m) => m.type === 'npc' && m.npc.id === 'alex' && m.npc.busyQuestId === q.id)).toBe(true);
-    expect(messages.at(-1)).toMatchObject({ type: 'npc', npc: { id: 'alex' } });
+    expect(messages.at(-1)).toEqual({ type: 'quest', quest: done });
+    expect((svc as unknown as { settledRuns: Map<string, unknown> }).settledRuns.size).toBe(0);
   });
 
   it('rejects starting a second quest for a busy npc', async () => {
@@ -225,6 +235,78 @@ describe('QuestService', () => {
     await svc.recall(q2.id);
   });
 
+  it('re-start by the same npc resumes; by a different npc starts a fresh session with the earlier scroll', async () => {
+    // Calls: 1 alex (recalled), 2 alex resumes (recalled), 3 lina takes over in a fresh session.
+    const alexFirst = fakeQuery([init('auto', 's-alex'), waitForMessage, success('s-alex')]);
+    const alexAgain = fakeQuery([init('auto', 's-alex'), waitForMessage, success('s-alex')]);
+    const linaFake = fakeQuery([init('auto', 's-lina'), success('s-lina')]);
+    const svc = service(sequence(alexFirst.fn, alexAgain.fn, linaFake.fn));
+    const q = await svc.create({ title: '修好登入', body: '登入按鈕沒反應' });
+    const first = await svc.start(q.id, { npcId: 'alex', dungeonId: 'd1' });
+    await svc.recall(q.id);
+
+    const again = await svc.start(q.id, { npcId: 'alex', dungeonId: 'd1' });
+    expect(again.worktreePath).toBe(first.worktreePath);
+    expect(alexFirst.calls[0]!.resume).toBeUndefined();
+    expect(alexAgain.calls[0]!.resume).toBe('s-alex');
+    expect(promptText(alexAgain.inputs[0])).toBe('會長請你繼續這個委託。');
+    await svc.recall(q.id);
+
+    const takenOver = await svc.start(q.id, { npcId: 'lina', dungeonId: 'd1' });
+    expect(takenOver.worktreePath).toBe(first.worktreePath);
+    expect(linaFake.calls[0]!.resume).toBeUndefined();
+    expect(linaFake.calls[0]!.cwd).toBe(first.worktreePath);
+    const dungeon = (await r.dungeons.get('d1'))!;
+    expect(promptText(linaFake.inputs[0])).toBe(`${questBrief(q, dungeon)}\n\n先前冒險的卷軸：\n已被召回`);
+    await svc.settled(q.id);
+
+    expect(await r.quests.get(q.id)).toMatchObject({ status: 'review', npcId: 'lina', sessionId: 's-lina' });
+    expect(await r.sessions.get('s-alex')).toMatchObject({ npcId: 'alex', questId: q.id });
+    expect(await r.sessions.get('s-lina')).toMatchObject({ npcId: 'lina', questId: q.id, cwd: first.worktreePath });
+  });
+
+  it('keeps the cumulative session cost when a later run ends without a result', async () => {
+    // Call 1 finishes at 0.5; call 2 (reject, resumes the same session) is recalled before any result.
+    const fake = fakeQuery([init(), success()]);
+    const blocked = fakeQuery([init(), waitForMessage, success()]);
+    const svc = service(sequence(fake.fn, blocked.fn));
+    const q = await svc.create({ title: '修好登入', body: '' });
+    await svc.start(q.id, { npcId: 'alex', dungeonId: 'd1' });
+    await svc.settled(q.id);
+    expect((await r.sessions.get('s-1'))!.costUsd).toBe(0.5);
+
+    await svc.reject(q.id, '測試沒過');
+    await svc.recall(q.id);
+    expect((await r.quests.get(q.id))!.status).toBe('open');
+    expect((await r.sessions.get('s-1'))!.costUsd).toBe(0.5);
+  });
+
+  it('frees the npc when creating the worktree fails, so it can start another quest', async () => {
+    const svc = service(fakeQuery([init(), success()]).fn);
+    const q1 = await svc.create({ title: '一', body: '' });
+    const q2 = await svc.create({ title: '二', body: '' });
+    await git(repo, 'branch', `loc/${q1.id}`);
+    await expect(svc.start(q1.id, { npcId: 'alex', dungeonId: 'd1' })).rejects.toThrow(`分支 loc/${q1.id} 已存在`);
+    expect((await r.npcs.get('alex'))!.busyQuestId).toBeUndefined();
+    expect((await r.quests.get(q1.id))!.status).toBe('open');
+
+    expect(await svc.start(q2.id, { npcId: 'alex', dungeonId: 'd1' })).toMatchObject({ status: 'adventuring', npcId: 'alex' });
+    await svc.settled(q2.id);
+    expect((await r.quests.get(q2.id))!.status).toBe('review');
+  });
+
+  it('frees the npc before the finished quest is broadcast', async () => {
+    const svc = service(fakeQuery([init(), success()]).fn);
+    const q = await svc.create({ title: '一', body: '' });
+    await svc.start(q.id, { npcId: 'alex', dungeonId: 'd1' });
+    await svc.settled(q.id);
+    const reviewAt = messages.findIndex((m) => m.type === 'quest' && m.quest.status === 'review');
+    const freedAt = messages.findIndex((m) => m.type === 'npc' && m.npc.id === 'alex' && m.npc.busyQuestId === undefined);
+    expect(reviewAt).toBeGreaterThan(-1);
+    expect(freedAt).toBeGreaterThan(-1);
+    expect(freedAt).toBeLessThan(reviewAt);
+  });
+
   it('recoverInterrupted reopens adventuring quests, frees npcs, keeps the worktree, and resumes the session', async () => {
     const id = 'q-interrupted';
     const { worktreePath, baseBranch } = await createWorktree(repo, dataDir, `loc/${id}`);
@@ -249,22 +331,28 @@ describe('QuestService', () => {
     const restarted = await svc.start(id, { npcId: 'alex', dungeonId: 'd1' });
     expect(restarted.worktreePath).toBe(worktreePath);
     expect(fake.calls[0]!.resume).toBe('s-old');
-    expect(promptText(fake.inputs[0])).toMatch(/^會長請你繼續這個委託。/);
+    expect(promptText(fake.inputs[0])).toBe('會長請你繼續這個委託。');
     await svc.settled(id);
     expect((await r.quests.get(id))!.status).toBe('review');
   });
 });
 
-describe('questPrompt', () => {
-  it('includes title, body, jira key and the fixed instructions', () => {
+describe('quest prompts', () => {
+  it('questBrief carries the quest content; questInstructions the standing instructions', () => {
     const q: Quest = {
       id: 'abcdef123', title: '修好登入', body: '登入按鈕沒反應', stars: 3, status: 'open',
       source: { kind: 'jira', key: 'PROJ-7', url: 'https://jira/browse/PROJ-7' }, branch: 'loc/PROJ-7-abcdef',
       rejections: 0, createdAt: 0, updatedAt: 0,
     };
-    const text = questPrompt(q, { id: 'd1', name: 'repo', path: '/x' });
-    for (const part of ['修好登入', '登入按鈕沒反應', 'PROJ-7', '你在獨立分支 loc/PROJ-7-abcdef 上工作', '完成時先 commit', '做了什麼、根本原因、如何驗證、還有什麼風險']) {
-      expect(text).toContain(part);
+    const dungeon = { id: 'd1', name: 'repo', path: '/x' };
+    const brief = questBrief(q, dungeon);
+    for (const part of ['修好登入', '登入按鈕沒反應', 'PROJ-7']) expect(brief).toContain(part);
+    expect(brief).not.toContain('你在獨立分支');
+    const rules = questInstructions('loc/PROJ-7-abcdef');
+    for (const part of ['你在獨立分支 loc/PROJ-7-abcdef 上工作', '完成時先 commit', '做了什麼、根本原因、如何驗證、還有什麼風險']) {
+      expect(rules).toContain(part);
     }
+    expect(handoverBrief(q, dungeon)).toBe(brief);
+    expect(handoverBrief({ ...q, scroll: '已被召回' }, dungeon)).toBe(`${brief}\n\n先前冒險的卷軸：\n已被召回`);
   });
 });
