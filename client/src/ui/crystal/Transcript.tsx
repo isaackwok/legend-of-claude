@@ -229,6 +229,7 @@ export function Transcript({ sessionId, refreshKey = 0 }: TranscriptProps) {
   const [history, setHistory] = useState<{ sessionId: string; messages: TranscriptMessage[]; fetchedAt: number }>();
   const [error, setError] = useState<string>();
   const endRef = useRef<HTMLDivElement>(null);
+  const stickRef = useRef(true);
 
   // A result/error event means the agent persisted new history: refetch it.
   const terminalId = useMemo(() => {
@@ -261,12 +262,20 @@ export function Transcript({ sessionId, refreshKey = 0 }: TranscriptProps) {
   const cutoff = loaded ? loaded.fetchedAt : error ? 0 : Number.POSITIVE_INFINITY;
   const items = useMemo(() => buildLiveItems(live.filter((e) => e.at > cutoff)), [live, cutoff]);
 
+  // Follow new content only while the reader is already near the bottom.
   useEffect(() => {
-    endRef.current?.scrollIntoView?.({ block: 'end' });
+    if (stickRef.current) endRef.current?.scrollIntoView?.({ block: 'end' });
   }, [loaded, items.length]);
 
   return (
-    <div className="transcript" aria-label="冒險日誌">
+    <div
+      className="transcript"
+      aria-label="冒險日誌"
+      onScroll={(e) => {
+        const el = e.currentTarget;
+        stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      }}
+    >
       {!loaded && !error && <p className="crystal-empty">讀取冒險日誌中…</p>}
       {error && <p className="crystal-empty">讀取歷史失敗：{error}</p>}
       {loaded && <HistoryView messages={loaded.messages} />}

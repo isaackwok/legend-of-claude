@@ -79,10 +79,18 @@ export function CrystalBall() {
     : undefined;
   const letters = selectedId ? approvals.filter((a) => a.sessionId === selectedId) : [];
 
+  // Bumped whenever the user starts or leaves a draft chat, so a late reply from an older draft is recognised.
+  const draftSeq = useRef(0);
+  const startChat = (npcId: string) => {
+    draftSeq.current += 1;
+    setDraftNpcId(npcId);
+  };
   const select = (sessionId: string) => {
+    draftSeq.current += 1;
     setDraftNpcId(undefined);
     openCrystal(sessionId);
   };
+  const sentFromDraft = draftNpcId ? draftSeq.current : undefined;
 
   let composer: ComposerMode | undefined;
   let heading = '';
@@ -93,9 +101,11 @@ export function CrystalBall() {
     heading = selected?.title ?? selectedQuest?.title ?? '冒險日誌';
     if (selectedQuest) {
       composer =
-        selectedQuest.status === 'adventuring'
-          ? { kind: 'quest', questId: selectedQuest.id }
-          : { kind: 'readonly', notice: '這趟冒險已經結束，日誌只能閱讀。' };
+        selectedQuest.sessionId !== selectedId
+          ? { kind: 'readonly', notice: '這是先前冒險的紀錄' }
+          : selectedQuest.status === 'adventuring'
+            ? { kind: 'quest', questId: selectedQuest.id }
+            : { kind: 'readonly', notice: '這趟冒險已經結束，日誌只能閱讀。' };
     } else if (selected && !selected.questId) {
       composer = { kind: 'chat', npcId: selected.npcId, sessionId: selected.id };
     }
@@ -105,7 +115,9 @@ export function CrystalBall() {
     setRefreshKey((k) => k + 1);
     if (sessionId) {
       void refresh();
-      if (draftNpcId) {
+      // Only follow the new session if the user is still looking at the draft that created it.
+      if (sentFromDraft !== undefined && sentFromDraft === draftSeq.current) {
+        draftSeq.current += 1;
         setDraftNpcId(undefined);
         openCrystal(sessionId);
       }
@@ -121,7 +133,7 @@ export function CrystalBall() {
         selectedId={draftNpcId ? undefined : selectedId}
         draftNpcId={draftNpcId}
         onSelect={select}
-        onStartChat={setDraftNpcId}
+        onStartChat={startChat}
       />
       <section className="crystal-main frame" aria-label="水晶球">
         {listError && (

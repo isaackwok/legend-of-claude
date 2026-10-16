@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Approval, GameEvent, Npc, Quest, SessionListItem, TranscriptMessage } from '@loc/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialState, useGame } from '../../state/store';
@@ -49,6 +49,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   sessionStorage.clear();
@@ -235,5 +236,111 @@ describe('CrystalBall', () => {
     useGame.getState().applyServerMessage({ type: 'event', event: ev({ kind: 'text', label: 'hi', sessionId: 's-new' }) });
     expect(await screen.findByText('新的一段')).toBeTruthy();
     expect(listCalls()).toBe(2);
+  });
+
+  it('only the current session of a quest gets 傳信/召回; an older session is read-only', async () => {
+    const oldSession: SessionListItem = { ...questSession, id: 's-old', updatedAt: 500, live: false };
+    sessions = [questSession, oldSession];
+    useGame.setState({ quests: { q1: quest('adventuring') }, ui: { panel: 'crystal', crystalSessionId: 's-old' } });
+    mockFetch();
+    render(<CrystalBall />);
+    expect(await screen.findByText('這是先前冒險的紀錄')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '傳信' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '召回' })).toBeNull();
+    act(() => useGame.getState().openCrystal('s-quest'));
+    expect(await screen.findByRole('button', { name: '傳信' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '召回' })).toBeTruthy();
+    expect(screen.queryByText('這是先前冒險的紀錄')).toBeNull();
+  });
+
+  it('a late history response for the previous session does not affect the new selection', async () => {
+    let resolveA: (r: Response) => void = () => {};
+    const aPromise = new Promise<Response>((r) => (resolveA = r));
+    history['s-quest'] = [{ role: 'assistant', blocks: [{ type: 'text', text: '委託的內容' }] }];
+    history['s-chat'] = [{ role: 'assistant', blocks: [{ type: 'text', text: '閒聊的內容' }] }];
+    const inner = mockFetch();
+    const base = (inner.getMockImplementation() as (u: string, i?: RequestInit) => Promise<Response>);
+    vi.stubGlobal('fetch', vi.fn((u: string, i?: RequestInit) => (u === '/api/sessions/s-chat/messages' ? aPromise : base(u, i))));
+    useGame.setState({ ui: { panel: 'crystal', crystalSessionId: 's-chat' } });
+    render(<CrystalBall />);
+    await screen.findByRole('region', { name: '亞瑟' });
+    act(() => useGame.getState().openCrystal('s-quest'));
+    expect(await screen.findByText('委託的內容')).toBeTruthy();
+    resolveA(new Response(JSON.stringify(history['s-chat']), { status: 200 }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText('閒聊的內容')).toBeNull();
+    expect(screen.getByText('委託的內容')).toBeTruthy();
+  });
+
+  it('a double-click on 同意 posts exactly once', async () => {
+    useGame.setState({ quests: { q1: quest('adventuring') }, approvals: { a1: approval }, ui: { panel: 'crystal', crystalSessionId: 's-quest' } });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const inner = mockFetch();
+    const base = (inner.getMockImplementation() as (u: string, i?: RequestInit) => Promise<Response>);
+    const fn = vi.fn(async (u: string, i?: RequestInit) => {
+      if (u === '/api/approvals/a1') {
+        await gate;
+        return new Response('{}', { status: 200 });
+      }
+      return base(u, i);
+    });
+    vi.stubGlobal('fetch', fn);
+    render(<CrystalBall />);
+    const btn = await screen.findByRole('button', { name: '同意' });
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    release();
+    await waitFor(() => expect(useGame.getState().approvals['a1']).toBeUndefined());
+    expect(fn.mock.calls.filter(([u]) => u === '/api/approvals/a1')).toHaveLength(1);
+  });
+
+  it('a late new-chat reply does not override a newer selection', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const inner = mockFetch();
+    const base = (inner.getMockImplementation() as (u: string, i?: RequestInit) => Promise<Response>);
+    vi.stubGlobal('fetch', vi.fn(async (u: string, i?: RequestInit) => {
+      if (u === '/api/chats') {
+        await gate;
+        return new Response(JSON.stringify({ sessionId: 's-created' }), { status: 200 });
+      }
+      return base(u, i);
+    }));
+    render(<CrystalBall />);
+    fireEvent.click(await screen.findByRole('button', { name: '與 NPC 聊天' }));
+    fireEvent.change(screen.getByLabelText('選擇聊天對象'), { target: { value: 'n1' } });
+    fireEvent.change(await screen.findByLabelText('聊天內容'), { target: { value: '嗨' } });
+    fireEvent.click(screen.getByRole('button', { name: '送出' }));
+    fireEvent.click(await screen.findByText('閒聊一下'));
+    expect(useGame.getState().ui.crystalSessionId).toBe('s-chat');
+    release();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(useGame.getState().ui.crystalSessionId).toBe('s-chat');
+  });
+
+  it('does not auto-scroll when the reader has scrolled up, but follows when near the bottom', async () => {
+    const spy = vi.fn();
+    Element.prototype.scrollIntoView = spy;
+    useGame.setState({ quests: { q1: quest('adventuring') }, ui: { panel: 'crystal', crystalSessionId: 's-quest' } });
+    mockFetch();
+    render(<CrystalBall />);
+    const box = await screen.findByLabelText('冒險日誌');
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    const geometry = (top: number) => {
+      Object.defineProperty(box, 'scrollHeight', { configurable: true, value: 1000 });
+      Object.defineProperty(box, 'clientHeight', { configurable: true, value: 200 });
+      Object.defineProperty(box, 'scrollTop', { configurable: true, value: top });
+      fireEvent.scroll(box);
+    };
+    geometry(100); // far from the bottom
+    spy.mockClear();
+    act(() => useGame.getState().applyServerMessage({ type: 'event', event: ev({ kind: 'text', label: 'a', detail: 'a' }) }));
+    await screen.findByText('a');
+    expect(spy).not.toHaveBeenCalled();
+    geometry(790); // within 40px of the bottom
+    act(() => useGame.getState().applyServerMessage({ type: 'event', event: ev({ kind: 'text', label: 'b', detail: 'b' }) }));
+    await screen.findByText('b');
+    expect(spy).toHaveBeenCalled();
   });
 });

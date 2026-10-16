@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api } from '../../api/http';
 
 export type ComposerMode =
@@ -16,12 +16,15 @@ export function Composer({ mode, onSent }: ComposerProps) {
   const [text, setText] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
+  const inFlight = useRef(false);
 
   if (mode.kind === 'readonly') {
     return <p className="composer-notice">{mode.notice}</p>;
   }
 
   const run = async (action: () => Promise<void>, clear: boolean) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setPending(true);
     setError(undefined);
     try {
@@ -30,6 +33,7 @@ export function Composer({ mode, onSent }: ComposerProps) {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      inFlight.current = false;
       setPending(false);
     }
   };

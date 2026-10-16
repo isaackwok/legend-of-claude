@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { Approval } from '@loc/shared';
 import { api } from '../../api/http';
 import { useGame } from '../../state/store';
@@ -13,8 +13,11 @@ export function PigeonLetter({ approval }: PigeonLetterProps) {
   const [message, setMessage] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
+  const inFlight = useRef(false);
 
   const answer = async (allow: boolean) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setPending(true);
     setError(undefined);
     try {
@@ -24,6 +27,7 @@ export function PigeonLetter({ approval }: PigeonLetterProps) {
       useGame.getState().applyServerMessage({ type: 'approval_resolved', id: approval.id });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      inFlight.current = false;
       setPending(false);
     }
   };
