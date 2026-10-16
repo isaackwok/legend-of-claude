@@ -108,3 +108,44 @@ input, select, textarea {
 .dungeon-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .dungeon-path { font-size: 12px; opacity: 0.8; }
 .dungeon-repo { font-size: 13px; color: var(--status-done); }
+
+.crystal { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 12px; height: 100%; min-height: 0; }
+@media (max-width: 760px) { .crystal { grid-template-columns: 1fr; } }
+.crystal-side { overflow: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 4px; }
+.crystal-side h3 { font-size: 15px; border-bottom: 1.5px dashed var(--border); margin-bottom: 4px; }
+.crystal-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.crystal-item { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 0; padding: 4px 8px; }
+.crystal-item[aria-current='true'] { background: var(--ink); color: var(--parchment-light); }
+.crystal-item-title { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crystal-item-sub { font-size: 12px; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crystal-empty { opacity: 0.7; font-size: 14px; margin: 4px 0; }
+.crystal-chat-start { display: flex; flex-direction: column; gap: 6px; }
+.crystal-main { display: flex; flex-direction: column; gap: 8px; padding: 12px; min-height: 0; overflow: hidden; }
+.crystal-heading { font-size: 17px; }
+.transcript { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 6px; min-height: 120px; }
+.msg { margin: 0; padding: 4px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg-user { background: var(--parchment); border-left: 4px solid var(--border); }
+.msg-assistant { border-left: 4px solid transparent; }
+.msg-result { background: var(--parchment); border-left: 4px solid var(--status-done); }
+.msg-error { color: var(--wax-red); border-left: 4px solid var(--wax-red); }
+.divider { text-align: center; font-size: 13px; opacity: 0.8; border-top: 1.5px dashed var(--border); padding-top: 2px; margin: 4px 0; }
+.tool { border: 1px solid var(--border); border-radius: 3px; background: var(--parchment); }
+.tool-nested { margin-left: 20px; }
+.tool-failed { border-color: var(--wax-red); }
+.tool-head { width: 100%; text-align: left; border: 0; background: transparent; font-size: 13px; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-prefix { color: var(--status-adventuring); font-weight: bold; }
+.tool-running { color: var(--status-adventuring); }
+.tool-body { padding: 4px 8px 8px; }
+.tool-body pre { margin: 4px 0 0; padding: 6px; background: var(--parchment-light); border: 1px solid var(--border); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; }
+.tool-path { font-family: var(--font-mono); font-size: 12px; }
+.diff-del { background: rgba(122, 46, 30, 0.18); color: var(--wax-red); }
+.diff-add { background: rgba(79, 107, 58, 0.2); color: var(--status-done); }
+.letter { padding: 8px 12px; border-color: var(--wax-red); }
+.letter-from { font-weight: bold; color: var(--wax-red); }
+.letter-summary { margin: 4px 0; overflow-wrap: anywhere; }
+.letter-reason, .letter-tool { font-size: 13px; margin: 2px 0; }
+.letter-note { display: flex; flex-direction: column; gap: 2px; font-size: 13px; margin-top: 6px; }
+.letter-actions, .composer-actions { display: flex; gap: 8px; margin-top: 8px; }
+.composer { display: flex; flex-direction: column; }
+.composer textarea { resize: vertical; width: 100%; }
+.composer-notice { opacity: 0.8; margin: 0; }

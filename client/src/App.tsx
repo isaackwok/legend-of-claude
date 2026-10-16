@@ -7,6 +7,7 @@ import { ConnectionBanner } from './ui/ConnectionBanner';
 import { Nav } from './ui/Nav';
 import { Preflight } from './ui/Preflight';
 import { Board } from './ui/board/Board';
+import { CrystalBall } from './ui/crystal/CrystalBall';
 import { DungeonsPanel } from './ui/dungeons/DungeonsPanel';
 
 // Read once at load: getToken() also moves the token from the URL into sessionStorage.
@@ -47,8 +48,8 @@ export function App() {
       <Nav />
       <main style={{ flex: 1, margin: 16, overflow: 'auto' }}>
         {panel === 'board' && <Board />}
-        {/* Crystal panel arrives in Task 15; 退回 dialog wiring (Board onReject) in Task 16. */}
-        {panel === 'crystal' && <div>水晶球（建置中）</div>}
+        {/* 退回 dialog wiring (Board onReject) arrives in Task 16. */}
+        {panel === 'crystal' && <CrystalBall />}
         {panel === 'dungeons' && <DungeonsPanel />}
       </main>
     </div>
