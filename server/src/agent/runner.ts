@@ -3,9 +3,11 @@ import type { CanUseTool, Options, PermissionResult, Query, SDKMessage, SDKUserM
 import type { GameEvent } from '@loc/shared';
 import type { ApprovalBroker } from './approvals.js';
 import type { QueryFn } from './queryFn.js';
-import { summarizeTool, translate, type ToolTracker } from './translate.js';
+import { summarizeTool, ToolTracker, translate } from './translate.js';
 
 export const RECALLED = '已被召回';
+export const NOT_STARTED = '冒險尚未開始，無法執行';
+export const CANCELLED = '請求已取消';
 /** How long `recall()` waits for the SDK to wind down after `interrupt()` before force-closing it. */
 const RECALL_GRACE_MS = 5000;
 
@@ -69,7 +71,8 @@ class InputQueue<T> implements AsyncIterable<T> {
 }
 
 function userMessage(text: string, priority?: SDKUserMessage['priority']): SDKUserMessage {
-  const m: SDKUserMessage = { type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null, origin: { kind: 'human' } };
+  // uuid-stamped so an interrupt receipt's `still_queued` can list it.
+  const m: SDKUserMessage = { type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null, origin: { kind: 'human' }, uuid: randomUUID() };
   if (priority !== undefined) m.priority = priority;
   return m;
 }
@@ -99,7 +102,7 @@ export class AgentRun {
   readonly done: Promise<RunOutcome>;
 
   private readonly input = new InputQueue<SDKUserMessage>();
-  private readonly tracker: ToolTracker = new Map();
+  private readonly tracker = new ToolTracker();
   /** Aborted on recall and when the run ends, so waiting approvals never outlive the run. */
   private readonly lifetime = new AbortController();
   private query: Query | undefined;
@@ -138,38 +141,52 @@ export class AgentRun {
 
   private async doRecall(): Promise<void> {
     this.recalled = true;
+    // Deny waiting approvals first: interrupt() may not return while a permission request is open.
+    this.lifetime.abort();
+    if (this.sessionId) this.params.broker.cancelForSession(this.sessionId);
+    let receipt: Awaited<ReturnType<Query['interrupt']>> | 'timeout' | undefined;
     try {
-      if (this.query) await withTimeout(this.query.interrupt(), RECALL_GRACE_MS);
+      if (this.query) receipt = await withTimeout(this.query.interrupt(), RECALL_GRACE_MS);
     } catch {
       // The query may already be finished; recall still has to end everything below.
     }
     this.input.end();
-    this.lifetime.abort();
-    if (this.sessionId) this.params.broker.cancelForSession(this.sessionId);
+    // Queued 傳信 that survived the interrupt would start a new turn: stop the session outright.
+    const stillQueued = receipt !== 'timeout' && (receipt?.still_queued?.length ?? 0) > 0;
+    if (stillQueued) this.closeQuery();
     const finished = await withTimeout(this.done, RECALL_GRACE_MS);
     if (finished === 'timeout') {
-      try {
-        this.query?.close();
-      } catch {
-        // ignore
-      }
+      this.closeQuery();
       await this.done;
     }
   }
 
-  private readonly canUseTool: CanUseTool = async (toolName, input, opts): Promise<PermissionResult> => {
-    const denied: PermissionResult = { behavior: 'deny', message: RECALLED };
-    let sessionId: string;
+  private closeQuery(): void {
     try {
-      ({ sessionId } = await this.init);
+      this.query?.close();
     } catch {
-      return denied;
+      // ignore
     }
-    if (this.recalled || this.lifetime.signal.aborted) return denied;
-    const meta: Parameters<ApprovalBroker['request']>[0] = { npcId: this.params.npcId, sessionId, toolName, summary: summarizeTool(toolName, input) };
+  }
+
+  private readonly canUseTool: CanUseTool = async (toolName, input, opts): Promise<PermissionResult> => {
+    const signal = AbortSignal.any([opts.signal, this.lifetime.signal]);
+    const deny = (message: string): PermissionResult => ({ behavior: 'deny', message });
+    const aborted = new Promise<'aborted'>((resolve) => {
+      if (signal.aborted) resolve('aborted');
+      else signal.addEventListener('abort', () => resolve('aborted'), { once: true });
+    });
+    let started: { sessionId: string } | 'aborted';
+    try {
+      started = await Promise.race([this.init, aborted]);
+    } catch {
+      started = 'aborted';
+    }
+    if (started === 'aborted' || signal.aborted) return deny(this.recalled ? RECALLED : this.initSeen ? CANCELLED : NOT_STARTED);
+    const meta: Parameters<ApprovalBroker['request']>[0] = { npcId: this.params.npcId, sessionId: started.sessionId, toolName, summary: summarizeTool(toolName, input) };
     if (this.params.questId !== undefined) meta.questId = this.params.questId;
     if (opts.decisionReason !== undefined) meta.reason = opts.decisionReason;
-    return this.params.broker.request(meta, AbortSignal.any([opts.signal, this.lifetime.signal]));
+    return this.params.broker.request(meta, signal);
   };
 
   private emit(msg: SDKMessage): void {

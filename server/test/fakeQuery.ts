@@ -1,14 +1,25 @@
 import type { CanUseTool, Options, PermissionResult, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { QueryFn } from '../src/agent/queryFn.js';
 
-/**
- * One scripted step: an SDK message to yield (typed loosely, cast inside), a call to the injected
- * `canUseTool` (awaited; its result is recorded), or a pause until `n` prompt messages were read.
- */
-export type FakeStep =
-  | Record<string, unknown>
-  | { canUseTool: { toolName: string; input: Record<string, unknown>; toolUseID?: string; decisionReason?: string } }
-  | { waitForInput: number };
+/** An SDK message to yield; typed loosely (cast inside) but must carry `type`. */
+export type FakeMessageStep = { type: string; [k: string]: unknown };
+export interface FakeCanUseToolStep {
+  /** Call the injected `canUseTool` and record its result. Awaited unless `detach` is set. */
+  canUseTool: { toolName: string; input: Record<string, unknown>; toolUseID?: string; decisionReason?: string; detach?: boolean };
+}
+export interface FakeWaitStep {
+  /** Pause until `n` prompt messages were read (or the prompt ended, or the query was stopped). */
+  waitForInput: number;
+}
+export type FakeStep = FakeMessageStep | FakeCanUseToolStep | FakeWaitStep;
+
+const isCanUseToolStep = (s: FakeStep): s is FakeCanUseToolStep => typeof (s as Partial<FakeCanUseToolStep>).canUseTool === 'object';
+const isWaitStep = (s: FakeStep): s is FakeWaitStep => typeof (s as Partial<FakeWaitStep>).waitForInput === 'number';
+
+export interface FakeQueryOptions {
+  /** What `interrupt()` resolves to (the SDK's interrupt receipt). Default `undefined` (older CLI). */
+  interruptReceipt?: { still_queued: string[] };
+}
 
 export interface FakeQuery {
   fn: QueryFn;
@@ -25,7 +36,7 @@ export interface FakeQuery {
 }
 
 /** A scripted fake `QueryFn`. Stops yielding once `interrupt()` or `close()` was called. */
-export function fakeQuery(script: FakeStep[]): FakeQuery {
+export function fakeQuery(script: FakeStep[], fakeOptions: FakeQueryOptions = {}): FakeQuery {
   const state = { interrupted: false, closed: false, inputEnded: false };
   const calls: Options[] = [];
   const inputs: SDKUserMessage[] = [];
@@ -58,15 +69,23 @@ export function fakeQuery(script: FakeStep[]): FakeQuery {
     async function* gen() {
       for (const step of script) {
         if (stopped()) return;
-        if ('canUseTool' in step && typeof step['canUseTool'] === 'object') {
-          const s = (step as { canUseTool: { toolName: string; input: Record<string, unknown>; toolUseID?: string; decisionReason?: string } }).canUseTool;
+        if (isCanUseToolStep(step)) {
+          const s = step.canUseTool;
           const canUseTool = options.canUseTool as CanUseTool;
           const controller = new AbortController();
           const opts: Parameters<CanUseTool>[2] = { signal: controller.signal, toolUseID: s.toolUseID ?? 'tu-1', requestId: 'req-1' };
           if (s.decisionReason !== undefined) opts.decisionReason = s.decisionReason;
-          permissionResults.push(await canUseTool(s.toolName, s.input, opts));
-        } else if ('waitForInput' in step && typeof step['waitForInput'] === 'number') {
-          const n = step['waitForInput'];
+          const call = canUseTool(s.toolName, s.input, opts);
+          if (s.detach) {
+            const index = permissionResults.push(null) - 1;
+            void call.then((r) => {
+              permissionResults[index] = r;
+            });
+          } else {
+            permissionResults.push(await call);
+          }
+        } else if (isWaitStep(step)) {
+          const n = step.waitForInput;
           await until(() => inputs.length >= n || state.inputEnded || stopped());
         } else {
           yield step;
@@ -78,7 +97,7 @@ export function fakeQuery(script: FakeStep[]): FakeQuery {
       interrupt: async () => {
         state.interrupted = true;
         notify();
-        return undefined;
+        return fakeOptions.interruptReceipt;
       },
       close: () => {
         state.closed = true;

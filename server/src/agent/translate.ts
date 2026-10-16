@@ -10,8 +10,54 @@ const FILE_TOOLS = new Set(['Edit', 'Write', 'Read']);
 type StartKind = Extract<GameEventKind, 'tool_start' | 'subagent_start' | 'background_start'>;
 const END_KIND: Record<StartKind, GameEventKind> = { tool_start: 'tool_end', subagent_start: 'subagent_end', background_start: 'background_end' };
 
-/** Per-run memory of started tools so a later `tool_result` maps to the right end kind and label. */
-export type ToolTracker = Map<string, { kind: StartKind; label: string }>;
+interface TrackedTool {
+  kind: StartKind;
+  label: string;
+  parentToolUseId: string | null;
+  /** Runs in the background: its tool_result is a placeholder and `task_notification` ends it. */
+  backgrounded: boolean;
+}
+
+/**
+ * Per-run memory of started tools so a later `tool_result` or `task_notification` maps to the right
+ * end kind and label. Background tasks are linked by `task_started` (task_id → tool_use_id).
+ */
+export class ToolTracker {
+  private readonly tools = new Map<string, TrackedTool>();
+  private readonly taskToTool = new Map<string, string>();
+  /** tool_use ids reported as backgrounded before their tool_use was seen. */
+  private readonly earlyBackground = new Set<string>();
+
+  start(toolUseId: string, entry: Omit<TrackedTool, 'backgrounded'>, backgrounded: boolean): void {
+    const bg = backgrounded || this.earlyBackground.delete(toolUseId);
+    this.tools.set(toolUseId, { ...entry, backgrounded: bg });
+  }
+
+  get(toolUseId: string): TrackedTool | undefined {
+    return this.tools.get(toolUseId);
+  }
+
+  end(toolUseId: string): void {
+    this.tools.delete(toolUseId);
+    for (const [task, tool] of this.taskToTool) if (tool === toolUseId) this.taskToTool.delete(task);
+  }
+
+  linkTask(taskId: string, toolUseId: string, backgrounded: boolean | undefined): void {
+    this.taskToTool.set(taskId, toolUseId);
+    if (backgrounded === true) this.markBackground(toolUseId);
+  }
+
+  backgroundTask(taskId: string): void {
+    const toolUseId = this.taskToTool.get(taskId);
+    if (toolUseId !== undefined) this.markBackground(toolUseId);
+  }
+
+  private markBackground(toolUseId: string): void {
+    const entry = this.tools.get(toolUseId);
+    if (entry) entry.backgrounded = true;
+    else this.earlyBackground.add(toolUseId);
+  }
+}
 
 export interface TranslateContext {
   npcId: string;
@@ -78,7 +124,7 @@ export function translate(msg: SDKMessage, ctx: TranslateContext): GameEvent[] {
           const kind = startKind(b['name'], input);
           const description = typeof input['description'] === 'string' ? input['description'] : undefined;
           const label = kind === 'subagent_start' && description ? description : summarizeTool(b['name'], input);
-          ctx.tracker?.set(b['id'], { kind, label });
+          ctx.tracker?.start(b['id'], { kind, label, parentToolUseId }, kind === 'background_start');
           events.push(make(kind, label, { detail: b['name'], toolUseId: b['id'], parentToolUseId }));
         }
       }
@@ -89,7 +135,9 @@ export function translate(msg: SDKMessage, ctx: TranslateContext): GameEvent[] {
       for (const b of blocksOf((m['message'] as { content?: unknown } | undefined)?.content)) {
         if (b.type !== 'tool_result' || typeof b['tool_use_id'] !== 'string') continue;
         const started = ctx.tracker?.get(b['tool_use_id']);
-        ctx.tracker?.delete(b['tool_use_id']);
+        // A backgrounded tool's tool_result is only a placeholder; task_notification ends it.
+        if (started?.backgrounded) continue;
+        ctx.tracker?.end(b['tool_use_id']);
         const kind = started ? END_KIND[started.kind] : 'tool_end';
         const base = started?.label ?? '工具完成';
         const label = b['is_error'] === true ? `${base}（失敗）` : base;
@@ -98,14 +146,50 @@ export function translate(msg: SDKMessage, ctx: TranslateContext): GameEvent[] {
       return events;
     }
     case 'system':
-      if (m['subtype'] === 'compact_boundary') return [make('compact', '正在整理筆記')];
-      return [];
+      return translateSystem(m, ctx, make);
     case 'result': {
       const ok = m['subtype'] === 'success' && m['is_error'] !== true;
       const text = typeof m['result'] === 'string' ? m['result'] : '';
       if (ok) return [make('result', '冒險回報', { detail: text })];
       const errors = Array.isArray(m['errors']) ? (m['errors'] as string[]) : [];
       return [make('error', '冒險失敗', { detail: errors.length > 0 ? errors.join('\n') : text || String(m['subtype']) })];
+    }
+    default:
+      return [];
+  }
+}
+
+const NOTIFICATION_SUFFIX: Record<string, string> = { completed: '', failed: '（失敗）', stopped: '（已停止）' };
+
+function translateSystem(
+  m: Record<string, unknown>,
+  ctx: TranslateContext,
+  make: (kind: GameEventKind, label: string, extra?: Partial<GameEvent>) => GameEvent,
+): GameEvent[] {
+  const tracker = ctx.tracker;
+  switch (m['subtype']) {
+    case 'compact_boundary':
+      return [make('compact', '正在整理筆記')];
+    case 'task_started':
+      if (tracker && typeof m['task_id'] === 'string' && typeof m['tool_use_id'] === 'string') {
+        tracker.linkTask(m['task_id'], m['tool_use_id'], m['is_backgrounded'] as boolean | undefined);
+      }
+      return [];
+    case 'task_updated': {
+      const patch = m['patch'] as { is_backgrounded?: boolean } | undefined;
+      if (tracker && typeof m['task_id'] === 'string' && patch?.is_backgrounded === true) tracker.backgroundTask(m['task_id']);
+      return [];
+    }
+    case 'task_notification': {
+      const toolUseId = m['tool_use_id'];
+      if (!tracker || typeof toolUseId !== 'string') return [];
+      const started = tracker.get(toolUseId);
+      // Foreground tools end on their tool_result; only backgrounded ones end here.
+      if (!started?.backgrounded) return [];
+      tracker.end(toolUseId);
+      const label = `${started.label}${NOTIFICATION_SUFFIX[String(m['status'])] ?? ''}`;
+      const summary = typeof m['summary'] === 'string' ? m['summary'] : '';
+      return [make(END_KIND[started.kind], label, { detail: summary, toolUseId, parentToolUseId: started.parentToolUseId })];
     }
     default:
       return [];

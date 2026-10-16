@@ -1,7 +1,7 @@
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
 import type { GameEvent } from '@loc/shared';
 import { describe, expect, it, vi } from 'vitest';
-import { fakeQuery, type FakeStep } from '../../test/fakeQuery.js';
+import { fakeQuery, type FakeQueryOptions, type FakeStep } from '../../test/fakeQuery.js';
 import { ApprovalBroker } from './approvals.js';
 import { AgentRun } from './runner.js';
 
@@ -18,8 +18,8 @@ const success = { type: 'result', subtype: 'success', is_error: false, result: '
 
 const baseOptions = { model: 'claude-haiku-5-5', permissionMode: 'auto' } as Options;
 
-function start(script: FakeStep[], extra: Partial<Parameters<typeof AgentRun.start>[0]> = {}) {
-  const fake = fakeQuery(script);
+function start(script: FakeStep[], extra: Partial<Parameters<typeof AgentRun.start>[0]> = {}, fakeOptions: FakeQueryOptions = {}) {
+  const fake = fakeQuery(script, fakeOptions);
   const broker = new ApprovalBroker();
   const events: GameEvent[] = [];
   const run = AgentRun.start({
@@ -83,11 +83,40 @@ describe('AgentRun', () => {
     await expect(run.recall()).resolves.toBeUndefined();
     expect(broker.list()).toEqual([]);
     expect(fake.interrupted).toBe(true);
+    expect(fake.closed).toBe(false);
     expect(fake.permissionResults[0]?.behavior).toBe('deny');
     const out = await run.done;
     expect(out).toMatchObject({ ok: false, errors: ['已被召回'], sessionId: 's-1' });
     await expect(run.recall()).resolves.toBeUndefined();
     expect(() => run.send('回來')).toThrow();
+  });
+
+  it('recall before init denies a waiting permission check and resolves not ok', async () => {
+    const { fake, broker, run } = start([{ canUseTool: { toolName: 'Bash', input: { command: 'ls' } } }, init, success]);
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+    await run.recall();
+    expect(fake.permissionResults).toEqual([{ behavior: 'deny', message: '已被召回' }]);
+    expect(broker.list()).toEqual([]);
+    expect(await run.done).toMatchObject({ ok: false, errors: ['已被召回'], sessionId: '' });
+    await expect(run.init).rejects.toThrow();
+  });
+
+  it('closes the query on recall when sends are still queued after the interrupt', async () => {
+    const { fake, run } = start([init, { waitForInput: 2 }, { waitForInput: 99 }, success], {}, { interruptReceipt: { still_queued: ['u-2'] } });
+    await run.init;
+    run.send('等等');
+    await vi.waitFor(() => expect(fake.inputs).toHaveLength(2));
+    expect(typeof fake.inputs[1]!.uuid).toBe('string');
+    await run.recall();
+    expect(fake.interrupted).toBe(true);
+    expect(fake.closed).toBe(true);
+    expect((await run.done).errors).toEqual(['已被召回']);
+  });
+
+  it('denies a permission check with a not-started message when the run ends without init', async () => {
+    const { fake, run } = start([{ canUseTool: { toolName: 'Bash', input: { command: 'ls' }, detach: true } }]);
+    expect((await run.done).ok).toBe(false);
+    await vi.waitFor(() => expect(fake.permissionResults).toEqual([{ behavior: 'deny', message: '冒險尚未開始，無法執行' }]));
   });
 
   it('reports an error result as not ok with its errors and cost', async () => {

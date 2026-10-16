@@ -1,6 +1,6 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { describe, expect, it } from 'vitest';
-import { summarizeTool, translate, type ToolTracker } from './translate.js';
+import { summarizeTool, ToolTracker, translate } from './translate.js';
 
 const ctx = { npcId: 'npc-1', questId: 'q-1' };
 const asMsg = (m: unknown) => m as SDKMessage;
@@ -51,27 +51,65 @@ describe('translate', () => {
     expect(events[0]).toMatchObject({ kind: 'text', detail: '我來看看。' });
   });
 
-  it('maps the Agent tool to subagent_start and its result to subagent_end', () => {
-    const tracker: ToolTracker = new Map();
+  it('maps a foreground Agent tool to subagent_start and its tool_result to subagent_end', () => {
+    const tracker = new ToolTracker();
     const [start] = translate(assistant([{ type: 'tool_use', id: 'a1', name: 'Agent', input: { description: '調查測試', prompt: '...' } }]), { ...ctx, tracker });
     expect(start).toMatchObject({ kind: 'subagent_start', label: '調查測試', toolUseId: 'a1' });
     const [end] = translate(toolResults([{ type: 'tool_result', tool_use_id: 'a1', content: [{ type: 'text', text: '報告' }] }]), { ...ctx, tracker });
     expect(end).toMatchObject({ kind: 'subagent_end', toolUseId: 'a1', detail: '報告' });
   });
 
-  it('maps a background Bash to background_start and its result to background_end', () => {
-    const tracker: ToolTracker = new Map();
+  const sys = (subtype: string, fields: Record<string, unknown>) => asMsg({ type: 'system', subtype, session_id: 's-1', uuid: 'u', ...fields });
+
+  it('ends a background subagent on task_notification, not on its placeholder tool_result', () => {
+    const tracker = new ToolTracker();
+    const c = { ...ctx, tracker };
+    const [start] = translate(assistant([{ type: 'tool_use', id: 'a1', name: 'Agent', input: { description: '調查測試', prompt: '...' } }]), c);
+    expect(start).toMatchObject({ kind: 'subagent_start', label: '調查測試' });
+    expect(translate(sys('task_started', { task_id: 'task-1', tool_use_id: 'a1', description: '調查測試', is_backgrounded: true }), c)).toEqual([]);
+    expect(translate(toolResults([{ type: 'tool_result', tool_use_id: 'a1', content: 'Async agent launched' }]), c)).toEqual([]);
+    const [end] = translate(sys('task_notification', { task_id: 'task-1', tool_use_id: 'a1', status: 'completed', summary: '找到原因', output_file: '/tmp/o' }), c);
+    expect(end).toMatchObject({ kind: 'subagent_end', label: '調查測試', detail: '找到原因', toolUseId: 'a1', parentToolUseId: null });
+    // Ended once: a repeated notification is ignored.
+    expect(translate(sys('task_notification', { task_id: 'task-1', tool_use_id: 'a1', status: 'completed', summary: 'x', output_file: '' }), c)).toEqual([]);
+  });
+
+  it('treats a task moved to the background by task_updated as backgrounded', () => {
+    const tracker = new ToolTracker();
+    const c = { ...ctx, tracker };
+    translate(assistant([{ type: 'tool_use', id: 'a2', name: 'Agent', input: { description: '慢慢查' } }]), c);
+    translate(sys('task_started', { task_id: 'task-2', tool_use_id: 'a2', description: '慢慢查', is_backgrounded: false }), c);
+    translate(sys('task_updated', { task_id: 'task-2', patch: { is_backgrounded: true } }), c);
+    expect(translate(toolResults([{ type: 'tool_result', tool_use_id: 'a2', content: 'moved to background' }]), c)).toEqual([]);
+    const [end] = translate(sys('task_notification', { task_id: 'task-2', tool_use_id: 'a2', status: 'stopped', summary: '中止', output_file: '' }), c);
+    expect(end).toMatchObject({ kind: 'subagent_end', label: '慢慢查（已停止）' });
+  });
+
+  it('maps a background Bash to background_start and a failed task_notification to background_end', () => {
+    const tracker = new ToolTracker();
+    const c = { ...ctx, tracker };
     const [start] = translate(
       assistant([{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'npm run dev', run_in_background: true } }]),
-      { ...ctx, tracker },
+      c,
     );
     expect(start).toMatchObject({ kind: 'background_start', label: 'npm run dev' });
-    const [end] = translate(toolResults([{ type: 'tool_result', tool_use_id: 'b1', content: 'started' }]), { ...ctx, tracker });
-    expect(end).toMatchObject({ kind: 'background_end', detail: 'started' });
+    expect(translate(toolResults([{ type: 'tool_result', tool_use_id: 'b1', content: 'Command running in background' }]), c)).toEqual([]);
+    const [end] = translate(sys('task_notification', { task_id: 'bash-1', tool_use_id: 'b1', status: 'failed', summary: 'exit 1', output_file: '' }), c);
+    expect(end).toMatchObject({ kind: 'background_end', label: 'npm run dev（失敗）', detail: 'exit 1', toolUseId: 'b1' });
+  });
+
+  it('ignores task_notification for foreground or unknown tools', () => {
+    const tracker = new ToolTracker();
+    const c = { ...ctx, tracker };
+    translate(assistant([{ type: 'tool_use', id: 'a3', name: 'Agent', input: { description: '前景' } }]), c);
+    expect(translate(sys('task_notification', { task_id: 't', tool_use_id: 'a3', status: 'completed', summary: '', output_file: '' }), c)).toEqual([]);
+    expect(translate(sys('task_notification', { task_id: 't', tool_use_id: 'zz', status: 'completed', summary: '', output_file: '' }), c)).toEqual([]);
+    const [end] = translate(toolResults([{ type: 'tool_result', tool_use_id: 'a3', content: '報告' }]), c);
+    expect(end).toMatchObject({ kind: 'subagent_end', label: '前景' });
   });
 
   it('maps tool_result to tool_end with the result text, marks failures, keeps parent_tool_use_id', () => {
-    const tracker: ToolTracker = new Map();
+    const tracker = new ToolTracker();
     translate(assistant([{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'npm test' } }], 'a1'), { ...ctx, tracker });
     const [end] = translate(
       toolResults([{ type: 'tool_result', tool_use_id: 't1', content: 'boom', is_error: true }], 'a1'),
