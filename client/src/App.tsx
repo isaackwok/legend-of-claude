@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import type { Preflight as PreflightInfo } from '@loc/shared';
+import { useEffect, useState } from 'react';
+import type { Preflight as PreflightInfo, Quest } from '@loc/shared';
 import { api, getToken } from './api/http';
 import { connectWs } from './api/ws';
 import { useGame } from './state/store';
@@ -7,8 +7,10 @@ import { ConnectionBanner } from './ui/ConnectionBanner';
 import { Nav } from './ui/Nav';
 import { Preflight } from './ui/Preflight';
 import { Board } from './ui/board/Board';
+import { RejectDialog } from './ui/board/RejectDialog';
 import { CrystalBall } from './ui/crystal/CrystalBall';
 import { DungeonsPanel } from './ui/dungeons/DungeonsPanel';
+import { SettlementDialog } from './ui/settlement/SettlementDialog';
 
 // Read once at load: getToken() also moves the token from the URL into sessionStorage.
 const hasToken = getToken() !== '';
@@ -16,6 +18,8 @@ const hasToken = getToken() !== '';
 export function App() {
   const preflight = useGame((s) => s.preflight);
   const panel = useGame((s) => s.ui.panel);
+  const settlementQuestId = useGame((s) => s.ui.settlementQuestId);
+  const [rejecting, setRejecting] = useState<Quest | null>(null);
 
   useEffect(() => {
     if (!hasToken) return;
@@ -47,11 +51,12 @@ export function App() {
       <Preflight preflight={preflight} />
       <Nav />
       <main style={{ flex: 1, margin: 16, overflow: 'auto' }}>
-        {panel === 'board' && <Board />}
-        {/* 退回 dialog wiring (Board onReject) arrives in Task 16. */}
+        {panel === 'board' && <Board onReject={setRejecting} />}
         {panel === 'crystal' && <CrystalBall />}
         {panel === 'dungeons' && <DungeonsPanel />}
       </main>
+      {settlementQuestId && <SettlementDialog key={settlementQuestId} questId={settlementQuestId} />}
+      {rejecting && <RejectDialog quest={rejecting} onClose={() => setRejecting(null)} />}
     </div>
   );
 }
