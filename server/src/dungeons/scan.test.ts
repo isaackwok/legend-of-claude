@@ -5,9 +5,13 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Dungeon, ServerMessage } from '@loc/shared';
+import { fakeQuery } from '../../test/fakeQuery.js';
+import { ApprovalBroker } from '../agent/approvals.js';
 import { loadConfig, type Config } from '../config.js';
 import { createApp } from '../http/app.js';
+import { QuestService } from '../quests/service.js';
 import { buildSnapshot } from '../snapshot.js';
+import { FileSessionStore } from '../store/fileSessionStore.js';
 import { repos as makeRepos, type Repos } from '../store/jsonRepo.js';
 import { inspectRepo, parseGithubRemote, scanForRepos } from './scan.js';
 
@@ -93,12 +97,17 @@ describe('/api/dungeons', () => {
     repos = makeRepos(dir);
     broadcasts = [];
     const preflight = { ignoredEnvVars: [], loggedIn: true, warnings: [] };
+    const hub = { broadcast: (m: ServerMessage) => void broadcasts.push(m) };
+    const broker = new ApprovalBroker();
+    const quests = new QuestService({ repos, hub, broker, queryFn: fakeQuery([]).fn, dataDir: dir, sessionStore: new FileSessionStore(join(dir, 'sessions')) });
     app = createApp({
       config,
       repos,
-      hub: { broadcast: (m) => void broadcasts.push(m) },
+      hub,
       getSnapshot: () => buildSnapshot(repos, preflight),
       getPreflight: () => preflight,
+      quests,
+      broker,
     });
   });
 

@@ -24,5 +24,5 @@ export type GameEventKind = 'text' | 'tool_start' | 'tool_end' | 'compact' | 'su
 export interface GameEvent { id: string; sessionId: string; npcId: string; questId?: string; at: number; kind: GameEventKind; label: string; detail?: string; toolUseId?: string; parentToolUseId?: string | null }
 export interface SettlementChoices { pushAndPr: boolean; jiraTransitionId?: string; jiraComment?: string; linkPr: boolean; openTicket: boolean }
 export interface SettlementRecord { choices: SettlementChoices; prUrl?: string; results: { action: string; ok: boolean; message: string }[]; at: number }
-export interface SessionIndexEntry { id: string /* sessionId */; npcId: string; questId?: string; title: string; cwd: string; updatedAt: number }
+export interface SessionIndexEntry { id: string /* sessionId */; npcId: string; questId?: string; title: string; cwd: string; updatedAt: number; costUsd?: number /* latest session-cumulative total, never summed */ }
 export interface Settings { id: 'settings'; scanRoot: string /* 初值 ~/dev */; lastSettlement?: SettlementChoices; connectors?: { name: string; prefix: string; status: string }[] }

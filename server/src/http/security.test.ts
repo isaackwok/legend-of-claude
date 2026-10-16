@@ -7,8 +7,12 @@ import { serve } from '@hono/node-server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import type { Preflight, Snapshot } from '@loc/shared';
+import { fakeQuery } from '../../test/fakeQuery.js';
+import { ApprovalBroker } from '../agent/approvals.js';
 import { loadConfig, type Config } from '../config.js';
+import { QuestService } from '../quests/service.js';
 import { buildSnapshot } from '../snapshot.js';
+import { FileSessionStore } from '../store/fileSessionStore.js';
 import { repos as makeRepos } from '../store/jsonRepo.js';
 import { WsHub } from '../ws/hub.js';
 import { createApp } from './app.js';
@@ -33,7 +37,10 @@ afterEach(async () => {
 function makeApp() {
   const repos = makeRepos(dir);
   const getSnapshot = () => buildSnapshot(repos, preflight);
-  return { repos, getSnapshot, app: createApp({ config, repos, hub: { broadcast: () => undefined }, getSnapshot, getPreflight: () => preflight }) };
+  const hub = { broadcast: () => undefined };
+  const broker = new ApprovalBroker();
+  const quests = new QuestService({ repos, hub, broker, queryFn: fakeQuery([]).fn, dataDir: dir, sessionStore: new FileSessionStore(join(dir, 'sessions')) });
+  return { repos, getSnapshot, app: createApp({ config, repos, hub, getSnapshot, getPreflight: () => preflight, quests, broker }) };
 }
 
 const HOST = '127.0.0.1:4517';
