@@ -9,6 +9,7 @@ import { WebSocket } from 'ws';
 import type { Preflight, Snapshot } from '@loc/shared';
 import { fakeQuery } from '../../test/fakeQuery.js';
 import { ApprovalBroker } from '../agent/approvals.js';
+import { ClerkService } from '../clerk/clerk.js';
 import { loadConfig, type Config } from '../config.js';
 import { QuestService } from '../quests/service.js';
 import { buildSnapshot } from '../snapshot.js';
@@ -39,8 +40,10 @@ function makeApp() {
   const getSnapshot = () => buildSnapshot(repos, preflight);
   const hub = { broadcast: () => undefined };
   const broker = new ApprovalBroker();
-  const quests = new QuestService({ repos, hub, broker, queryFn: fakeQuery([]).fn, dataDir: dir, sessionStore: new FileSessionStore(join(dir, 'sessions')) });
-  return { repos, getSnapshot, app: createApp({ config, repos, hub, getSnapshot, getPreflight: () => preflight, quests, broker }) };
+  const sessionStore = new FileSessionStore(join(dir, 'sessions'));
+  const quests = new QuestService({ repos, hub, broker, queryFn: fakeQuery([]).fn, dataDir: dir, sessionStore });
+  const clerk = new ClerkService({ repos, hub, broker, queryFn: fakeQuery([]).fn, dataDir: dir, sessionStore, quests });
+  return { repos, getSnapshot, app: createApp({ config, repos, hub, getSnapshot, getPreflight: () => preflight, quests, broker, clerk }) };
 }
 
 const HOST = '127.0.0.1:4517';

@@ -1,4 +1,4 @@
-import type { CanUseTool, Options, PermissionResult, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { CanUseTool, McpServerStatus, Options, PermissionResult, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { QueryFn } from '../src/agent/queryFn.js';
 
 /** An SDK message to yield; typed loosely (cast inside) but must carry `type`. */
@@ -19,6 +19,11 @@ const isWaitStep = (s: FakeStep): s is FakeWaitStep => typeof (s as Partial<Fake
 export interface FakeQueryOptions {
   /** What `interrupt()` resolves to (the SDK's interrupt receipt). Default `undefined` (older CLI). */
   interruptReceipt?: { still_queued: string[] };
+  /**
+   * Successive answers of `mcpServerStatus()` (the last one repeats). A poll may be an `Error` to
+   * reject. Default: always `[]`.
+   */
+  mcpServerStatus?: Array<McpServerStatus[] | Error>;
 }
 
 export interface FakeQuery {
@@ -29,6 +34,8 @@ export interface FakeQuery {
   inputs: SDKUserMessage[];
   /** What the injected `canUseTool` returned for each `canUseTool` step. */
   permissionResults: Array<PermissionResult | null>;
+  /** How many times `mcpServerStatus()` was called. */
+  readonly statusPolls: number;
   readonly interrupted: boolean;
   readonly closed: boolean;
   /** Whether the prompt iterable has ended. */
@@ -37,7 +44,7 @@ export interface FakeQuery {
 
 /** A scripted fake `QueryFn`. Stops yielding once `interrupt()` or `close()` was called. */
 export function fakeQuery(script: FakeStep[], fakeOptions: FakeQueryOptions = {}): FakeQuery {
-  const state = { interrupted: false, closed: false, inputEnded: false };
+  const state = { interrupted: false, closed: false, inputEnded: false, statusPolls: 0 };
   const calls: Options[] = [];
   const inputs: SDKUserMessage[] = [];
   const permissionResults: Array<PermissionResult | null> = [];
@@ -103,6 +110,14 @@ export function fakeQuery(script: FakeStep[], fakeOptions: FakeQueryOptions = {}
         state.closed = true;
         notify();
       },
+      initializationResult: async () => ({}),
+      mcpServerStatus: async () => {
+        const answers = fakeOptions.mcpServerStatus ?? [];
+        const answer = answers[Math.min(state.statusPolls, answers.length - 1)] ?? [];
+        state.statusPolls++;
+        if (answer instanceof Error) throw answer;
+        return answer;
+      },
     });
     return q;
   }) as unknown as QueryFn;
@@ -112,6 +127,9 @@ export function fakeQuery(script: FakeStep[], fakeOptions: FakeQueryOptions = {}
     calls,
     inputs,
     permissionResults,
+    get statusPolls() {
+      return state.statusPolls;
+    },
     get interrupted() {
       return state.interrupted;
     },

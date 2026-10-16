@@ -22,8 +22,19 @@ export function connectorPrefixesFrom(settings: Settings): string[] {
 }
 
 /**
+ * Canonical connector prefix (R19) for an MCP server name: the bare server segment of its tool names,
+ * e.g. `claude.ai Google Calendar` -> `claude_ai_Google_Calendar`. Mirrors the CLI's normalization
+ * (spike rule a in docs/superpowers/spikes/2026-10-16-results.md).
+ */
+export function connectorPrefix(serverName: string): string {
+  let r = serverName.replace(/[^a-zA-Z0-9_-]/g, '_');
+  if (serverName.startsWith('claude.ai ')) r = r.replace(/_+/g, '_').replace(/^_|_$/g, '');
+  return r;
+}
+
+/**
  * The one place prefix spelling is normalized: `slack`, `mcp__slack__` and `mcp__slack` all become
- * `slack` (the inventory stores the full `mcp__claude_ai_Slack__` form; equipment may use either).
+ * `slack` (the inventory stores the bare form, e.g. `claude_ai_Slack`; equipment may use either).
  */
 export function normalizeConnectorPrefix(prefix: string): string {
   return prefix.replace(/^mcp__/, '').replace(/__$/, '');

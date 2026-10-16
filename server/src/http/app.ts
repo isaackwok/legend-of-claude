@@ -1,13 +1,17 @@
 import { Hono } from 'hono';
 import type { Preflight, ServerMessage, Snapshot } from '@loc/shared';
 import type { ApprovalBroker } from '../agent/approvals.js';
+import type { ClerkService } from '../clerk/clerk.js';
 import type { Config } from '../config.js';
 import type { QuestService } from '../quests/service.js';
 import type { Repos } from '../store/jsonRepo.js';
 import { approvalRoutes } from './routes/approvals.js';
 import { dungeonRoutes } from './routes/dungeons.js';
+import { inventoryRoutes } from './routes/inventory.js';
+import { jiraRoutes } from './routes/jira.js';
 import { preflightRoutes } from './routes/preflight.js';
 import { questRoutes } from './routes/quests.js';
+import { settlementRoutes } from './routes/settlement.js';
 import { requireAuth, requireHost } from './security.js';
 
 /** Services the HTTP layer needs; later tasks add to this. */
@@ -19,6 +23,7 @@ export interface AppDeps {
   getPreflight: () => Preflight;
   quests: QuestService;
   broker: ApprovalBroker;
+  clerk: ClerkService;
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -29,6 +34,9 @@ export function createApp(deps: AppDeps): Hono {
   api.route('/preflight', preflightRoutes(deps.getPreflight));
   api.route('/dungeons', dungeonRoutes({ repos: deps.repos, hub: deps.hub }));
   api.route('/quests', questRoutes(deps.quests));
+  api.route('/quests', settlementRoutes(deps.clerk));
+  api.route('/jira', jiraRoutes(deps.clerk));
+  api.route('/inventory', inventoryRoutes(deps.clerk));
   api.route('/approvals', approvalRoutes(deps.broker));
   app.route('/api', api);
   return app;

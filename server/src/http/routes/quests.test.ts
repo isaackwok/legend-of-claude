@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Preflight, Quest } from '@loc/shared';
 import { fakeQuery } from '../../../test/fakeQuery.js';
 import { ApprovalBroker } from '../../agent/approvals.js';
+import { ClerkService } from '../../clerk/clerk.js';
 import { loadConfig, type Config } from '../../config.js';
 import { seedNpcs } from '../../npcs/seeds.js';
 import { QuestService } from '../../quests/service.js';
@@ -44,8 +45,10 @@ beforeEach(async () => {
   broker = new ApprovalBroker();
   const hub = { broadcast: () => undefined };
   const script = [{ type: 'system', subtype: 'init', session_id: 's-1', permissionMode: 'auto' }, { waitForInput: 2 }, { type: 'result', subtype: 'success', is_error: false, result: 'ok', session_id: 's-1' }];
-  quests = new QuestService({ repos, hub, broker, queryFn: fakeQuery(script).fn, dataDir, sessionStore: new FileSessionStore(join(dataDir, 'sessions')), env: {} });
-  app = createApp({ config, repos, hub, getSnapshot: () => buildSnapshot(repos, preflight, broker.list()), getPreflight: () => preflight, quests, broker });
+  const sessionStore = new FileSessionStore(join(dataDir, 'sessions'));
+  quests = new QuestService({ repos, hub, broker, queryFn: fakeQuery(script).fn, dataDir, sessionStore, env: {} });
+  const clerk = new ClerkService({ repos, hub, broker, queryFn: fakeQuery([]).fn, dataDir, sessionStore, quests, env: {} });
+  app = createApp({ config, repos, hub, getSnapshot: () => buildSnapshot(repos, preflight, broker.list()), getPreflight: () => preflight, quests, broker, clerk });
 });
 afterEach(() => rm(tmp, { recursive: true, force: true }));
 

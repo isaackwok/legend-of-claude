@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { repos as makeRepos, type Repos } from '../store/jsonRepo.js';
 import { sdkEnv } from '../preflight.js';
 import { ensureSeedNpcs, seedNpcs } from '../npcs/seeds.js';
-import { CLASS_TEMPLATES, GIT_PUSH_DENY, MODELS, READ_ONLY_DENY, buildAgentOptions, connectorPrefixesFrom } from './options.js';
+import { CLASS_TEMPLATES, GIT_PUSH_DENY, MODELS, READ_ONLY_DENY, buildAgentOptions, connectorDenyRule, connectorPrefix, connectorPrefixesFrom } from './options.js';
 
 const sessionStore = new InMemorySessionStore();
 
@@ -31,6 +31,18 @@ describe('CLASS_TEMPLATES', () => {
     expect(CLASS_TEMPLATES.scholar).toMatchObject({ model: MODELS.sonnet, effort: 'medium', equipment: { readOnly: true } });
     expect(CLASS_TEMPLATES.scout).toMatchObject({ model: MODELS.haiku, effort: 'low', equipment: { readOnly: true } });
     expect(CLASS_TEMPLATES.freeman).toMatchObject({ model: MODELS.sonnet, effort: 'medium', equipment: { readOnly: false } });
+  });
+});
+
+describe('connectorPrefix', () => {
+  it.each([
+    ['claude.ai Slack', 'claude_ai_Slack'],
+    ['claude.ai Google Calendar', 'claude_ai_Google_Calendar'],
+    ['claude.ai monday.com', 'claude_ai_monday_com'],
+    ['my-server', 'my-server'],
+  ])('%s -> %s (spike rule a, bare form per R19)', (name, prefix) => {
+    expect(connectorPrefix(name)).toBe(prefix);
+    expect(connectorDenyRule(connectorPrefix(name))).toBe(`mcp__${prefix}__*`);
   });
 });
 

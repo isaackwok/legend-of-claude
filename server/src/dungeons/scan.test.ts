@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Dungeon, ServerMessage } from '@loc/shared';
 import { fakeQuery } from '../../test/fakeQuery.js';
 import { ApprovalBroker } from '../agent/approvals.js';
+import { ClerkService } from '../clerk/clerk.js';
 import { loadConfig, type Config } from '../config.js';
 import { createApp } from '../http/app.js';
 import { QuestService } from '../quests/service.js';
@@ -99,7 +100,9 @@ describe('/api/dungeons', () => {
     const preflight = { ignoredEnvVars: [], loggedIn: true, warnings: [] };
     const hub = { broadcast: (m: ServerMessage) => void broadcasts.push(m) };
     const broker = new ApprovalBroker();
-    const quests = new QuestService({ repos, hub, broker, queryFn: fakeQuery([]).fn, dataDir: dir, sessionStore: new FileSessionStore(join(dir, 'sessions')) });
+    const sessionStore = new FileSessionStore(join(dir, 'sessions'));
+    const quests = new QuestService({ repos, hub, broker, queryFn: fakeQuery([]).fn, dataDir: dir, sessionStore });
+    const clerk = new ClerkService({ repos, hub, broker, queryFn: fakeQuery([]).fn, dataDir: dir, sessionStore, quests });
     app = createApp({
       config,
       repos,
@@ -108,6 +111,7 @@ describe('/api/dungeons', () => {
       getPreflight: () => preflight,
       quests,
       broker,
+      clerk,
     });
   });
 

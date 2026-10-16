@@ -4,6 +4,7 @@ import { serve } from '@hono/node-server';
 import type { Preflight } from '@loc/shared';
 import { ApprovalBroker } from './agent/approvals.js';
 import { realQueryFn } from './agent/queryFn.js';
+import { ClerkService } from './clerk/clerk.js';
 import { loadConfig } from './config.js';
 import { createApp } from './http/app.js';
 import { ensureSeedNpcs } from './npcs/seeds.js';
@@ -32,7 +33,9 @@ const quests = new QuestService({ repos, hub, broker, queryFn: realQueryFn, data
 // Nothing is running yet: quests left adventuring by the last run go back to open before serving.
 await quests.recoverInterrupted();
 
-const app = createApp({ config, repos, hub, getSnapshot, getPreflight, quests, broker });
+const clerk = new ClerkService({ repos, hub, broker, queryFn: realQueryFn, dataDir: config.dataDir, sessionStore, quests });
+
+const app = createApp({ config, repos, hub, getSnapshot, getPreflight, quests, broker, clerk });
 
 const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: config.port }, () => {
   console.log(`克勞德傳說已啟動：http://127.0.0.1:${config.clientPort}/?token=${config.token}`);

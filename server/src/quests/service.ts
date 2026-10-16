@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { SessionStore } from '@anthropic-ai/claude-agent-sdk';
-import { transition, type Dungeon, type Npc, type Quest, type QuestSource, type ServerMessage } from '@loc/shared';
+import { transition, type Dungeon, type Npc, type Quest, type QuestSource, type ServerMessage, type SettlementRecord } from '@loc/shared';
 import type { ApprovalBroker } from '../agent/approvals.js';
 import { buildAgentOptions, connectorPrefixesFrom } from '../agent/options.js';
 import type { QueryFn } from '../agent/queryFn.js';
@@ -227,6 +227,21 @@ export class QuestService {
     } finally {
       this.claimedQuests.delete(questId);
     }
+  }
+
+  /**
+   * Holds a quest for a long operation outside this service (settlement), so start / reject / abandon
+   * are refused meanwhile. Returns the release function.
+   */
+  hold(questId: string): () => void {
+    if (this.claimedQuests.has(questId)) throw new ConflictError(QUEST_BUSY);
+    this.claimedQuests.add(questId);
+    return () => this.claimedQuests.delete(questId);
+  }
+
+  /** 驗收 (R4): review -> done with the settlement record, broadcast. */
+  accept(questId: string, record: SettlementRecord): Promise<Quest> {
+    return this.patchQuest(questId, (q) => ({ ...q, status: transition(q.status, 'accept'), settlement: record, updatedAt: Date.now() }));
   }
 
   /** Startup: nothing runs yet, so every adventuring quest was cut off by a restart. Worktrees are kept. */
