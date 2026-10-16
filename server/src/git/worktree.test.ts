@@ -12,6 +12,7 @@ import {
   commitIfDirty,
   createWorktree,
   diffStat,
+  isWorktreeClean,
   nonInteractiveGit,
   pushBranch,
   worktreeExists,
@@ -137,6 +138,17 @@ describe('createWorktree', () => {
     await expect(createWorktree(repo, dataDir, '--evil')).rejects.toThrow();
     await expect(createWorktree(repo, dataDir, 'a b')).rejects.toThrow();
     await expect(stat(join(dataDir, 'worktrees'))).rejects.toThrow();
+  });
+});
+
+describe('isWorktreeClean', () => {
+  it('is false with untracked or modified files and true after committing', async () => {
+    const { worktreePath } = await createWorktree(repo, dataDir, 'loc/clean');
+    expect(await isWorktreeClean(worktreePath)).toBe(true);
+    await writeFile(join(worktreePath, 'new.txt'), 'x\n');
+    expect(await isWorktreeClean(worktreePath)).toBe(false);
+    await commitIfDirty(worktreePath, 'add new');
+    expect(await isWorktreeClean(worktreePath)).toBe(true);
   });
 });
 

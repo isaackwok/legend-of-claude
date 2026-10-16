@@ -8,7 +8,7 @@ import type { ApprovalBroker } from '../agent/approvals.js';
 import { buildAgentOptions, clerkConnectors, connectorPrefix, connectorPrefixesFrom, normalizeConnectorPrefix, PUSH_DENY } from '../agent/options.js';
 import type { QueryFn } from '../agent/queryFn.js';
 import { AgentRun } from '../agent/runner.js';
-import { pushBranch } from '../git/worktree.js';
+import { commitIfDirty, isWorktreeClean, pushBranch } from '../git/worktree.js';
 import { sdkEnv } from '../preflight.js';
 import { NotFoundError, type QuestService } from '../quests/service.js';
 import type { Repos } from '../store/jsonRepo.js';
@@ -440,6 +440,14 @@ export class ClerkService {
     if (!dungeon) return fail('找不到這座地下城');
     if (!dungeon.githubRepo) return fail(NO_GITHUB_REMOTE);
     if (!quest.branch || !quest.worktreePath || !quest.baseBranch) return fail('這個委託沒有可推送的分支');
+    // The finish-time auto-commit may have failed (hooks, signing); never publish a branch that is
+    // missing the latest edits. Retry the commit, and refuse to push if anything is still uncommitted.
+    try {
+      await commitIfDirty(quest.worktreePath, `loc: ${quest.title}`);
+    } catch (err) {
+      return fail(`工作目錄有未提交的修改，自動提交失敗：${errorText(err)}`);
+    }
+    if (!(await isWorktreeClean(quest.worktreePath))) return fail('工作目錄仍有未提交的修改，請先處理後再結算');
     try {
       await pushBranch(quest.worktreePath, quest.branch);
     } catch (err) {

@@ -415,6 +415,31 @@ describe('ClerkService.settle', () => {
     expect(done.lastSettlementAttempt).toBeUndefined();
   });
 
+  it('commits leftover worktree changes before pushing', async () => {
+    const clerk = clerkWith(fakeQuery(structured({ prUrl: 'https://github.com/acme/repo/pull/9', error: null })).fn);
+    const q = await reviewQuest();
+    await writeFile(join(q.worktreePath!, 'late.txt'), 'late edit\n');
+    const record = await clerk.settle(q.id, { pushAndPr: true, linkPr: false, openTicket: false });
+    expect(record.accepted).toBe(true);
+    expect(await git(origin, 'show', `refs/heads/${q.branch!}:late.txt`)).toBe('late edit');
+  });
+
+  it('refuses to push a worktree whose changes cannot be committed, and keeps the quest in review', async () => {
+    const fake = fakeQuery(structured({ prUrl: 'https://github.com/acme/repo/pull/9', error: null }));
+    const clerk = clerkWith(fake.fn);
+    const q = await reviewQuest();
+    await writeFile(join(q.worktreePath!, 'late.txt'), 'late edit\n');
+    const hook = join(repo, '.git', 'hooks', 'pre-commit');
+    await writeFile(hook, '#!/bin/sh\necho "hook says no" >&2\nexit 1\n', { mode: 0o755 });
+    const record = await clerk.settle(q.id, { pushAndPr: true, linkPr: false, openTicket: false });
+    expect(record.accepted).toBe(false);
+    expect(record.results[0]).toMatchObject({ action: 'pushAndPr', ok: false });
+    expect(record.results[0]!.message).toContain('未提交');
+    expect((await r.quests.get(q.id))!.status).toBe('review');
+    expect(await git(origin, 'branch', '--list', q.branch!)).toBe('');
+    expect(fake.calls).toHaveLength(0);
+  });
+
   it('accepts when push/PR was not chosen, even if a jira step fails', async () => {
     const clerk = clerkWith(fakeQuery(failing('Jira 掛了')).fn);
     const q = await reviewQuest({ source: jiraSource });

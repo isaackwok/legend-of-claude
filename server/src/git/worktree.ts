@@ -118,6 +118,11 @@ export async function commitIfDirty(worktreePath: string, message: string): Prom
   return true;
 }
 
+/** True when the worktree has no staged, unstaged or untracked (non-ignored) changes. */
+export async function isWorktreeClean(worktreePath: string): Promise<boolean> {
+  return (await git(worktreePath, ['status', '--porcelain'])).trim() === '';
+}
+
 export async function diffStat(worktreePath: string, baseBranch: string): Promise<string> {
   return git(worktreePath, ['diff', '--stat', `${baseBranch}...HEAD`]);
 }
