@@ -43,6 +43,18 @@ describe('game store', () => {
     expect(s.events['s1']).toHaveLength(1);
   });
 
+  it('preflight message replaces the preflight', () => {
+    const g = useGame.getState();
+    g.applyServerMessage({ type: 'preflight', preflight: { ignoredEnvVars: [], loggedIn: false, warnings: ['x'] } });
+    expect(useGame.getState().preflight?.loggedIn).toBe(false);
+  });
+
+  it('tracks connection status', () => {
+    expect(useGame.getState()).toMatchObject({ connection: 'connecting', connectionFailures: 0 });
+    useGame.getState().setConnection('retrying', 2);
+    expect(useGame.getState()).toMatchObject({ connection: 'retrying', connectionFailures: 2 });
+  });
+
   it('quest message overwrites the same id', () => {
     const g = useGame.getState();
     g.applyServerMessage({ type: 'quest', quest: quest('q1', 'old') });

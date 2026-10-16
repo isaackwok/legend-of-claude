@@ -22,8 +22,10 @@ export function getToken(): string {
 
 /** Authenticated JSON request against `/api`. Non-2xx throws an Error carrying the server's `{ error }` text. */
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = getToken();
+  if (!token) throw new Error('沒有存取令牌，請用伺服器印出的網址開啟');
   const headers = new Headers(init.headers);
-  headers.set('Authorization', `Bearer ${getToken()}`);
+  headers.set('Authorization', `Bearer ${token}`);
   if (init.body !== undefined && init.body !== null && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }

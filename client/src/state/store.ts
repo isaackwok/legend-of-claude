@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Approval, Dungeon, GameEvent, Npc, Preflight, Quest, ServerMessage } from '@loc/shared';
+import type { ConnectionState } from '../api/ws';
 
 /** Events kept per session; the oldest are dropped first. */
 export const EVENT_CAP = 500;
@@ -19,21 +20,25 @@ export interface GameState {
   approvals: Record<string, Approval>;
   events: Record<string, GameEvent[]>;
   preflight: Preflight | null;
+  /** WebSocket state and consecutive failed attempts (for the stale-token banner). */
+  connection: ConnectionState;
+  connectionFailures: number;
   ui: UiState;
   applyServerMessage: (msg: ServerMessage) => void;
   setDungeons: (list: Dungeon[]) => void;
   removeDungeon: (id: string) => void;
   setPreflight: (p: Preflight) => void;
+  setConnection: (state: ConnectionState, failures: number) => void;
   openPanel: (panel: PanelId) => void;
   openCrystal: (sessionId: string) => void;
   openSettlement: (questId: string) => void;
   closeSettlement: () => void;
 }
 
-type Data = Pick<GameState, 'quests' | 'npcs' | 'dungeons' | 'approvals' | 'events' | 'preflight' | 'ui'>;
+type Data = Pick<GameState, 'quests' | 'npcs' | 'dungeons' | 'approvals' | 'events' | 'preflight' | 'connection' | 'connectionFailures' | 'ui'>;
 
 export function initialState(): Data {
-  return { quests: {}, npcs: {}, dungeons: {}, approvals: {}, events: {}, preflight: null, ui: { panel: 'board' } };
+  return { quests: {}, npcs: {}, dungeons: {}, approvals: {}, events: {}, preflight: null, connection: 'connecting', connectionFailures: 0, ui: { panel: 'board' } };
 }
 
 function byId<T extends { id: string }>(list: T[]): Record<string, T> {
@@ -64,6 +69,8 @@ export const useGame = create<GameState>()((set) => ({
           return { dungeons: { ...s.dungeons, [msg.dungeon.id]: msg.dungeon } };
         case 'approval':
           return { approvals: { ...s.approvals, [msg.approval.id]: msg.approval } };
+        case 'preflight':
+          return { preflight: msg.preflight };
         case 'approval_resolved': {
           if (!(msg.id in s.approvals)) return {};
           const { [msg.id]: _gone, ...rest } = s.approvals;
@@ -85,6 +92,7 @@ export const useGame = create<GameState>()((set) => ({
       return { dungeons: rest };
     }),
   setPreflight: (preflight) => set({ preflight }),
+  setConnection: (connection, connectionFailures) => set({ connection, connectionFailures }),
 
   openPanel: (panel) => set((s) => ({ ui: { ...s.ui, panel } })),
   openCrystal: (sessionId) => set((s) => ({ ui: { ...s.ui, panel: 'crystal', crystalSessionId: sessionId } })),

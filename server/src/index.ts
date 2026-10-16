@@ -1,7 +1,6 @@
 import type { Server } from 'node:http';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
-import type { Preflight } from '@loc/shared';
 import { ApprovalBroker } from './agent/approvals.js';
 import { realQueryFn } from './agent/queryFn.js';
 import { ChatService } from './chats/service.js';
@@ -10,6 +9,7 @@ import { loadConfig } from './config.js';
 import { createApp } from './http/app.js';
 import { ensureSeedNpcs } from './npcs/seeds.js';
 import { runPreflight, sdkEnv } from './preflight.js';
+import { PreflightState } from './preflightState.js';
 import { QuestService } from './quests/service.js';
 import { buildSnapshot } from './snapshot.js';
 import { FileSessionStore } from './store/fileSessionStore.js';
@@ -20,11 +20,11 @@ const config = loadConfig();
 const repos = makeRepos(config.dataDir);
 await ensureSeedNpcs(repos);
 
-// Placeholder until the startup check finishes.
-let preflight: Preflight = { ignoredEnvVars: sdkEnv().ignored, loggedIn: true, warnings: [] };
-const getPreflight = () => preflight;
+// Placeholder until the startup check finishes; the finished result is broadcast to connected clients.
+const preflightState = new PreflightState({ ignoredEnvVars: sdkEnv().ignored, loggedIn: true, warnings: [] }, (msg) => hub.broadcast(msg));
+const getPreflight = () => preflightState.get();
 const broker = new ApprovalBroker();
-const getSnapshot = () => buildSnapshot(repos, preflight, broker.list());
+const getSnapshot = () => buildSnapshot(repos, preflightState.get(), broker.list());
 
 const hub = new WsHub(getSnapshot);
 broker.onChange((msg) => hub.broadcast(msg));
@@ -45,6 +45,6 @@ const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: config.por
 hub.attach(server, config);
 
 void runPreflight(realQueryFn, { dataDir: config.dataDir }).then((result) => {
-  preflight = result;
+  preflightState.set(result);
   for (const w of result.warnings) console.warn(`[啟動檢查] ${w}`);
 });

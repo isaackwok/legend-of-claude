@@ -23,7 +23,8 @@ export type ServerMessage =
   | { type: 'dungeon'; dungeon: Dungeon }
   | { type: 'event'; event: GameEvent }
   | { type: 'approval'; approval: Approval }
-  | { type: 'approval_resolved'; id: string };
+  | { type: 'approval_resolved'; id: string }
+  | { type: 'preflight'; preflight: Preflight };
 
 // 水晶球：session 列表與冒險日誌（HTTP 回應）
 export type SessionListItem = SessionIndexEntry & { live: boolean };

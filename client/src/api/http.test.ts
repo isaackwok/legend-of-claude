@@ -21,6 +21,12 @@ describe('getToken', () => {
 });
 
 describe('api', () => {
+  it('throws immediately without a token and sends nothing', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(api('/x')).rejects.toThrow('沒有存取令牌');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it('adds the Bearer header and parses JSON', async () => {
     sessionStorage.setItem('loc.token', 'tok');
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: 1 }), { status: 200 }));
@@ -33,10 +39,12 @@ describe('api', () => {
     expect(h.get('Content-Type')).toBe('application/json');
   });
   it('throws the server error message on non-2xx', async () => {
+    sessionStorage.setItem('loc.token', 'tok');
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: '壞了' }), { status: 400 })));
     await expect(api('/x')).rejects.toThrow('壞了');
   });
   it('falls back to a status message and handles 204', async () => {
+    sessionStorage.setItem('loc.token', 'tok');
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
     await expect(api('/x')).rejects.toThrow('500');
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })));
