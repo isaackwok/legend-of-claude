@@ -4,6 +4,7 @@ import type { Preflight } from '@loc/shared';
 import { realQueryFn } from './agent/queryFn.js';
 import { loadConfig } from './config.js';
 import { createApp } from './http/app.js';
+import { ensureSeedNpcs } from './npcs/seeds.js';
 import { runPreflight, sdkEnv } from './preflight.js';
 import { buildSnapshot } from './snapshot.js';
 import { repos as makeRepos } from './store/jsonRepo.js';
@@ -11,6 +12,7 @@ import { WsHub } from './ws/hub.js';
 
 const config = loadConfig();
 const repos = makeRepos(config.dataDir);
+await ensureSeedNpcs(repos);
 
 // Placeholder until the startup check finishes.
 let preflight: Preflight = { ignoredEnvVars: sdkEnv().ignored, loggedIn: true, warnings: [] };
