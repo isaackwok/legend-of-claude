@@ -1,3 +1,5 @@
 .superpowers/
 node_modules/
 .remember/
+dist/
+*.tsbuildinfo
