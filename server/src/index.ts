@@ -20,12 +20,12 @@ const getSnapshot = () => buildSnapshot(repos, preflight);
 const app = createApp({ config, repos, getSnapshot, getPreflight });
 const hub = new WsHub(getSnapshot);
 
-const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: config.port }) as Server;
+const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: config.port }, () => {
+  console.log(`克勞德傳說已啟動：http://127.0.0.1:${config.clientPort}/?token=${config.token}`);
+}) as Server;
 hub.attach(server, config);
 
 void runPreflight(realQueryFn, { dataDir: config.dataDir }).then((result) => {
   preflight = result;
   for (const w of result.warnings) console.warn(`[啟動檢查] ${w}`);
 });
-
-console.log(`克勞德傳說已啟動：http://127.0.0.1:${config.clientPort}/?token=${config.token}`);

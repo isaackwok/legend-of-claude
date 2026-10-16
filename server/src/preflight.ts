@@ -45,7 +45,7 @@ export async function runPreflight(
     await mkdir(cwd, { recursive: true, mode: 0o700 });
     q = queryFn({
       prompt: 'Reply with just: OK',
-      options: { model: 'claude-haiku-5-5', maxTurns: 1, env, settingSources: [], cwd, abortController },
+      options: { model: 'claude-haiku-5-5', maxTurns: 1, env, settingSources: [], cwd, abortController, persistSession: false, tools: [] },
     });
     for await (const msg of q) {
       if (msg.type === 'system' && msg.subtype === 'init') {
@@ -58,6 +58,7 @@ export async function runPreflight(
         if (msg.is_error) {
           const text = 'errors' in msg ? msg.errors.join('\n') : msg.result;
           if (looksNotLoggedIn(text)) result.loggedIn = false;
+          else if (result.loggedIn) result.warnings.push(`啟動檢查失敗：${text || msg.subtype}`);
         }
         break;
       }

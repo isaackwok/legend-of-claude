@@ -54,7 +54,7 @@ describe('runPreflight', () => {
     const result = await runPreflight(fn, { dataDir: dir, env: { ANTHROPIC_API_KEY: 'k', PATH: '/bin' } });
     expect(result).toEqual({ ignoredEnvVars: ['ANTHROPIC_API_KEY'], apiKeySource: 'none', loggedIn: true, warnings: [] });
     const options = calls[0]!.options!;
-    expect(options).toMatchObject({ model: 'claude-haiku-5-5', maxTurns: 1, settingSources: [], cwd: join(dir, 'guildhall') });
+    expect(options).toMatchObject({ model: 'claude-haiku-5-5', maxTurns: 1, settingSources: [], persistSession: false, tools: [], cwd: join(dir, 'guildhall') });
     expect((options['env'] as Record<string, string>)['ANTHROPIC_API_KEY']).toBeUndefined();
     expect((await stat(join(dir, 'guildhall'))).isDirectory()).toBe(true);
   });
@@ -75,6 +75,13 @@ describe('runPreflight', () => {
   it('reports not logged in on an error result that mentions it', async () => {
     const { fn } = fakeQuery([init, { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['Not logged in'] }]);
     expect((await runPreflight(fn, { dataDir: dir, env: {} })).loggedIn).toBe(false);
+  });
+
+  it('warns (and stays logged in) on a non-login error result', async () => {
+    const { fn } = fakeQuery([init, { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['rate limited'] }]);
+    const result = await runPreflight(fn, { dataDir: dir, env: {} });
+    expect(result.loggedIn).toBe(true);
+    expect(result.warnings).toEqual(['啟動檢查失敗：rate limited']);
   });
 
   it('does not claim logged-out for an unrelated failure, but warns', async () => {
