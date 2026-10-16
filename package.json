@@ -7,6 +7,7 @@
   "workspaces": ["shared", "server", "client"],
   "scripts": {
     "dev": "concurrently -k -n server,client -c blue,green \"npm run dev -w @loc/server\" \"npm run dev -w @loc/client\"",
+    "start": "npm run build -w @loc/client && npm run start -w @loc/server",
     "test": "vitest run",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

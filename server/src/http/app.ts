@@ -17,6 +17,7 @@ import { questRoutes } from './routes/quests.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { settlementRoutes } from './routes/settlement.js';
 import { requireAuth, requireHost } from './security.js';
+import { staticClient } from './static.js';
 
 /** Services the HTTP layer needs; later tasks add to this. */
 export interface AppDeps {
@@ -30,6 +31,8 @@ export interface AppDeps {
   clerk: ClerkService;
   chats: ChatService;
   sessionStore: SessionStore;
+  /** Production mode: directory of the built client to serve (with SPA fallback). Omit in dev (Vite serves it). */
+  clientDir?: string;
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -50,5 +53,6 @@ export function createApp(deps: AppDeps): Hono {
     sessionRoutes({ repos: deps.repos, sessionStore: deps.sessionStore, liveSessionIds: () => [...deps.quests.liveSessionIds(), ...deps.chats.liveSessionIds()] }),
   );
   app.route('/api', api);
+  if (deps.clientDir) app.use('*', staticClient(deps.clientDir, deps.config));
   return app;
 }

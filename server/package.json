@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "start": "LOC_SERVE_CLIENT=1 tsx src/index.ts",
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {

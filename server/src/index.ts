@@ -1,5 +1,6 @@
 import type { Server } from 'node:http';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { ApprovalBroker } from './agent/approvals.js';
 import { realQueryFn } from './agent/queryFn.js';
@@ -17,6 +18,10 @@ import { repos as makeRepos } from './store/jsonRepo.js';
 import { WsHub } from './ws/hub.js';
 
 const config = loadConfig();
+// `npm start` sets LOC_SERVE_CLIENT=1: serve the built client from this port instead of relying on the Vite dev server.
+const serveClient = process.env['LOC_SERVE_CLIENT'] === '1';
+const clientDir = serveClient ? fileURLToPath(new URL('../../client/dist', import.meta.url)) : undefined;
+const publicPort = serveClient ? config.port : config.clientPort;
 const repos = makeRepos(config.dataDir);
 await ensureSeedNpcs(repos);
 
@@ -37,10 +42,10 @@ await quests.recoverInterrupted();
 const clerk = new ClerkService({ repos, hub, broker, queryFn: realQueryFn, dataDir: config.dataDir, sessionStore, quests });
 const chats = new ChatService({ repos, hub, broker, queryFn: realQueryFn, dataDir: config.dataDir, sessionStore });
 
-const app = createApp({ config, repos, hub, getSnapshot, getPreflight, quests, broker, clerk, chats, sessionStore });
+const app = createApp({ config, repos, hub, getSnapshot, getPreflight, quests, broker, clerk, chats, sessionStore, clientDir });
 
 const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: config.port }, () => {
-  console.log(`克勞德傳說已啟動：http://127.0.0.1:${config.clientPort}/?token=${config.token}`);
+  console.log(`克勞德傳說已啟動：http://127.0.0.1:${publicPort}/?token=${config.token}`);
 }) as Server;
 hub.attach(server, config);
 
