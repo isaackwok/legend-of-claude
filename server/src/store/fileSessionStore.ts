@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { foldSessionSummary } from '@anthropic-ai/claude-agent-sdk';
 import type {
@@ -52,8 +52,13 @@ export class FileSessionStore implements SessionStore {
     await this.withLock(key, async () => {
       const fresh = await this.dedupe(file, entries);
       if (fresh.length === 0) return;
-      await mkdir(dirname(file), { recursive: true });
-      await appendFile(file, fresh.map((e) => JSON.stringify(e) + '\n').join(''), 'utf8');
+      await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+      // A crash can leave a torn last line without '\n'; start on a fresh line so we don't glue onto it.
+      const lead = (await endsMidLine(file)) ? '\n' : '';
+      await appendFile(file, lead + fresh.map((e) => JSON.stringify(e) + '\n').join(''), {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
       // Subagent transcripts do not feed the session summary.
       if (key.subpath === undefined) {
         const mtime = Math.floor((await stat(file)).mtimeMs);
@@ -66,7 +71,7 @@ export class FileSessionStore implements SessionStore {
     const file = this.fileFor(key);
     return this.withLock(key, async () => {
       const text = await this.readText(file);
-      return text === undefined ? null : parseLines(text);
+      return text === undefined ? null : parseLines(text, file);
     });
   }
 
@@ -90,8 +95,8 @@ export class FileSessionStore implements SessionStore {
     const out: SessionSummaryEntry[] = [];
     for (const name of await this.readDir(dir)) {
       if (!name.endsWith(SUMMARY_SUFFIX)) continue;
-      const text = await this.readText(join(dir, name));
-      if (text !== undefined) out.push(JSON.parse(text) as SessionSummaryEntry);
+      const summary = await this.readSummary(join(dir, name));
+      if (summary) out.push(summary);
     }
     return out;
   }
@@ -175,7 +180,7 @@ export class FileSessionStore implements SessionStore {
     if (entries.some((e) => typeof e.uuid === 'string')) {
       const text = await this.readText(file);
       if (text !== undefined) {
-        for (const e of parseLines(text)) if (typeof e.uuid === 'string') seen.add(e.uuid);
+        for (const e of parseLines(text, file)) if (typeof e.uuid === 'string') seen.add(e.uuid);
       }
     }
     const fresh: SessionStoreEntry[] = [];
@@ -191,12 +196,31 @@ export class FileSessionStore implements SessionStore {
 
   private async foldSummary(key: SessionKey, entries: SessionStoreEntry[], mtime: number): Promise<void> {
     const sidecar = this.summaryFile(key);
-    const text = await this.readText(sidecar);
-    const prev = text === undefined ? undefined : (JSON.parse(text) as SessionSummaryEntry);
-    const next = foldSessionSummary(prev, key, entries, { mtime });
+    const prev = await this.readSummary(sidecar);
+    let batch = entries;
+    if (!prev) {
+      // No usable sidecar (first append, or corrupt): rebuild from the whole transcript, which already includes `entries`.
+      const file = this.fileFor(key);
+      const text = await this.readText(file);
+      if (text !== undefined) batch = parseLines(text, file);
+    }
+    const next = foldSessionSummary(prev, key, batch, { mtime });
     const tmp = `${sidecar}.${randomUUID()}.tmp`;
-    await writeFile(tmp, JSON.stringify(next), 'utf8');
+    await writeFile(tmp, JSON.stringify(next), { encoding: 'utf8', mode: 0o600 });
     await rename(tmp, sidecar);
+  }
+
+  /** Read a summary sidecar; a missing or unparseable file counts as absent. */
+  private async readSummary(file: string): Promise<SessionSummaryEntry | undefined> {
+    const text = await this.readText(file);
+    if (text === undefined) return undefined;
+    try {
+      const parsed = JSON.parse(text) as SessionSummaryEntry;
+      return parsed && typeof parsed === 'object' && typeof parsed.sessionId === 'string' ? parsed : undefined;
+    } catch {
+      warnOnce(file, 'corrupt session summary ignored');
+      return undefined;
+    }
   }
 
   private async readText(file: string): Promise<string | undefined> {
@@ -218,10 +242,43 @@ export class FileSessionStore implements SessionStore {
   }
 }
 
-function parseLines(text: string): SessionStoreEntry[] {
+const warned = new Set<string>();
+function warnOnce(file: string, msg: string): void {
+  if (warned.has(file)) return;
+  warned.add(file);
+  console.warn(`[FileSessionStore] ${msg}: ${file}`);
+}
+
+/** True when the file exists, is non-empty and its last byte is not '\n' (torn write). */
+async function endsMidLine(file: string): Promise<boolean> {
+  let fh;
+  try {
+    fh = await open(file, 'r');
+  } catch (err) {
+    if (isEnoent(err)) return false;
+    throw err;
+  }
+  try {
+    const { size } = await fh.stat();
+    if (size === 0) return false;
+    const buf = Buffer.alloc(1);
+    await fh.read(buf, 0, 1, size - 1);
+    return buf[0] !== 0x0a;
+  } finally {
+    await fh.close();
+  }
+}
+
+/** Parse JSONL; unparseable lines (e.g. a torn trailing write) are skipped with a one-time warning. */
+function parseLines(text: string, file: string): SessionStoreEntry[] {
   const out: SessionStoreEntry[] = [];
   for (const line of text.split('\n')) {
-    if (line.trim() !== '') out.push(JSON.parse(line) as SessionStoreEntry);
+    if (line.trim() === '') continue;
+    try {
+      out.push(JSON.parse(line) as SessionStoreEntry);
+    } catch {
+      warnOnce(file, 'skipped unparseable transcript line');
+    }
   }
   return out;
 }

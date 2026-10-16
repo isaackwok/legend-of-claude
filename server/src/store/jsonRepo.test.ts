@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -51,6 +51,15 @@ describe('JsonRepo', () => {
     await expect(repo.put(circular)).rejects.toThrow();
     await repo.put({ id: 'ok', n: 1 });
     expect(await repo.list()).toEqual([{ id: 'ok', n: 1 }]);
+  });
+});
+
+describe('JsonRepo permissions', () => {
+  it.skipIf(process.platform === 'win32')('creates the directory 0700 and the file 0600', async () => {
+    const sub = join(dir, 'data', 'nested');
+    await new JsonRepo<Item>(join(sub, 'a.json')).put({ id: 'x', n: 1 });
+    expect((await stat(sub)).mode & 0o777).toBe(0o700);
+    expect((await stat(join(sub, 'a.json'))).mode & 0o777).toBe(0o600);
   });
 });
 

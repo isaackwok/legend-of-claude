@@ -57,9 +57,9 @@ export class JsonRepo<T extends { id: string }> {
   }
 
   private async write(items: T[]): Promise<void> {
-    await mkdir(dirname(this.file), { recursive: true });
+    await mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
     const tmp = `${this.file}.${randomUUID()}.tmp`;
-    await writeFile(tmp, JSON.stringify({ items }, null, 2), 'utf8');
+    await writeFile(tmp, JSON.stringify({ items }, null, 2), { encoding: 'utf8', mode: 0o600 });
     await rename(tmp, this.file);
   }
 }

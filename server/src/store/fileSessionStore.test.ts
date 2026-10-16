@@ -1,7 +1,7 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { appendFile, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { join } from 'node:path';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { runSessionStoreConformance } from '../../test/sessionStoreConformance.js';
 import { FileSessionStore } from './fileSessionStore.js';
 
@@ -48,6 +48,72 @@ describe('FileSessionStore specifics', () => {
     expect(loaded).toHaveLength(20);
   });
 
+  it('concurrent appends re-sending the same uuids yield no duplicates and a complete summary', async () => {
+    const store = new FileSessionStore(await tmpDir());
+    // 10 batches, each overlapping its neighbour (retries), all racing.
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) =>
+        store.append(KEY, [user(`u${i}`, `prompt ${i}`), user(`u${i + 1}`, `prompt ${i + 1}`)]),
+      ),
+    );
+    const loaded = await store.load(KEY);
+    expect(loaded).toHaveLength(11);
+    expect(new Set(loaded?.map((e) => e.uuid)).size).toBe(11);
+    const [summary] = await store.listSessionSummaries('proj');
+    expect(summary?.sessionId).toBe('sess');
+    expect(summary?.mtime).toBe((await store.listSessions('proj'))[0]?.mtime);
+    // Summary was folded from every distinct entry: rebuilding from scratch gives the same data.
+    const root2 = new FileSessionStore(await tmpDir());
+    await root2.append(KEY, loaded ?? []);
+    expect((await root2.listSessionSummaries('proj'))[0]?.data).toEqual(summary?.data);
+  });
+
+  it.skipIf(process.platform === 'win32')('creates directories 0700 and files 0600', async () => {
+    const root = join(await tmpDir(), 'nested', 'sessions');
+    const store = new FileSessionStore(root);
+    await store.append(KEY, [user('u1')]);
+    await store.append({ ...KEY, subpath: 'subagents/a' }, [user('s1')]);
+    const mode = async (p: string) => (await stat(p)).mode & 0o777;
+    expect(await mode(join(root, 'proj'))).toBe(0o700);
+    expect(await mode(join(root, 'proj', 'sess'))).toBe(0o700);
+    expect(await mode(join(root, 'proj', 'sess', 'subagents'))).toBe(0o700);
+    expect(await mode(join(root, 'proj', 'sess.jsonl'))).toBe(0o600);
+    expect(await mode(join(root, 'proj', 'sess.summary.json'))).toBe(0o600);
+    expect(await mode(join(root, 'proj', 'sess', 'subagents', 'a.jsonl'))).toBe(0o600);
+  });
+
+  it('tolerates a torn trailing line: load, dedupe and later appends keep working', async () => {
+    const root = await tmpDir();
+    const store = new FileSessionStore(root);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await store.append(KEY, [user('u1'), user('u2')]);
+    await appendFile(join(root, 'proj', 'sess.jsonl'), '{"type":"user","uuid":"u3","mess'); // crash mid-write
+    expect((await store.load(KEY))?.map((e) => e.uuid)).toEqual(['u1', 'u2']);
+    await store.append(KEY, [user('u2'), user('u4')]); // dedupe must still work; u4 must not glue onto the torn line
+    expect((await store.load(KEY))?.map((e) => e.uuid)).toEqual(['u1', 'u2', 'u4']);
+    expect(warn.mock.calls.length).toBe(1); // warned once per file
+    warn.mockRestore();
+  });
+
+  it('treats a corrupt summary sidecar as absent and rebuilds it on the next append', async () => {
+    const root = await tmpDir();
+    const store = new FileSessionStore(root);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await store.append(KEY, [user('u1', 'first prompt')]);
+    await store.append({ projectKey: 'proj', sessionId: 'other' }, [user('o1')]);
+    const good = (await store.listSessionSummaries('proj')).find((s) => s.sessionId === 'sess');
+    await writeFile(join(root, 'proj', 'sess.summary.json'), '{"sessionId":"se'); // torn sidecar
+    const listed = await store.listSessionSummaries('proj');
+    expect(listed.map((s) => s.sessionId)).toEqual(['other']); // others still listed
+    await store.append(KEY, [user('u2', 'second prompt')]);
+    const rebuilt = (await store.listSessionSummaries('proj')).find((s) => s.sessionId === 'sess');
+    expect(rebuilt).toBeDefined();
+    // set-once fields (e.g. firstPrompt) come from the whole transcript, not just the new batch
+    expect(JSON.stringify(rebuilt?.data)).toContain('first prompt');
+    expect(JSON.stringify(good?.data)).toContain('first prompt');
+    warn.mockRestore();
+  });
+
   it('maintains session summaries with the persist-time mtime and skips subpath batches', async () => {
     const store = new FileSessionStore(await tmpDir());
     await store.append(KEY, [user('u1', 'first prompt')]);
@@ -82,7 +148,7 @@ describe('FileSessionStore specifics', () => {
     await expect(store.load({ projectKey: '..', sessionId: 's' })).rejects.toThrow();
     await expect(store.delete({ projectKey: 'p', sessionId: '..' })).rejects.toThrow();
     // nothing was written next to the root
-    expect(dirname(root)).not.toBe(root);
+    expect(await readdir(root)).toEqual([]);
     const ok = { projectKey: 'p', sessionId: 's', subpath: 'subagents/agent-1' };
     await store.append(ok, e);
     expect(await store.listSubkeys(ok)).toEqual(['subagents/agent-1']);
