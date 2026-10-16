@@ -4,6 +4,7 @@ import { serve } from '@hono/node-server';
 import type { Preflight } from '@loc/shared';
 import { ApprovalBroker } from './agent/approvals.js';
 import { realQueryFn } from './agent/queryFn.js';
+import { ChatService } from './chats/service.js';
 import { ClerkService } from './clerk/clerk.js';
 import { loadConfig } from './config.js';
 import { createApp } from './http/app.js';
@@ -34,8 +35,9 @@ const quests = new QuestService({ repos, hub, broker, queryFn: realQueryFn, data
 await quests.recoverInterrupted();
 
 const clerk = new ClerkService({ repos, hub, broker, queryFn: realQueryFn, dataDir: config.dataDir, sessionStore, quests });
+const chats = new ChatService({ repos, hub, broker, queryFn: realQueryFn, dataDir: config.dataDir, sessionStore });
 
-const app = createApp({ config, repos, hub, getSnapshot, getPreflight, quests, broker, clerk });
+const app = createApp({ config, repos, hub, getSnapshot, getPreflight, quests, broker, clerk, chats, sessionStore });
 
 const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: config.port }, () => {
   console.log(`克勞德傳說已啟動：http://127.0.0.1:${config.clientPort}/?token=${config.token}`);

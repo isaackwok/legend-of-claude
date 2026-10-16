@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 import { InvalidTransitionError, STATUS_LABEL, type QuestAction } from '@loc/shared';
+import { ChatError } from '../../chats/service.js';
 import { ClerkError } from '../../clerk/clerk.js';
 import { BranchExistsError, WorktreePathExistsError } from '../../git/worktree.js';
 import { QuestServiceError } from '../../quests/service.js';
@@ -17,7 +18,7 @@ export const BAD_REQUEST = '請求內容不正確';
 
 /** Maps service / clerk / state-machine / git errors to `{ error }` with a Chinese message. */
 export function errorResponse(c: Context, err: unknown): Response {
-  if (err instanceof QuestServiceError || err instanceof ClerkError) return c.json({ error: err.message }, err.status);
+  if (err instanceof QuestServiceError || err instanceof ClerkError || err instanceof ChatError) return c.json({ error: err.message }, err.status);
   if (err instanceof InvalidTransitionError) {
     return c.json({ error: `委託目前是「${STATUS_LABEL[err.from]}」，不能${ACTION_LABEL[err.action]}` }, 409);
   }

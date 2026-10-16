@@ -96,6 +96,8 @@ export class QuestService {
   /** Quests with a lifecycle operation or a run in flight; released when the run's finish is handled. */
   private readonly claimedQuests = new Set<string>();
   private readonly settledRuns = new Map<string, Promise<void>>();
+  /** questId -> sessionId of the quest's current run, known once the SDK sent init. */
+  private readonly liveSessions = new Map<string, string>();
   /** Serializes read-modify-write of quest/npc records. */
   private lock: Promise<unknown> = Promise.resolve();
 
@@ -259,6 +261,11 @@ export class QuestService {
     }
   }
 
+  /** Session ids of the quests whose NPC is running right now (read-only; for the crystal ball). */
+  liveSessionIds(): string[] {
+    return [...this.liveSessions].filter(([questId]) => this.runs.has(questId)).map(([, sessionId]) => sessionId);
+  }
+
   /** Resolves once the quest's current run has ended and its finish was handled. */
   settled(questId: string): Promise<void> {
     return this.settledRuns.get(questId) ?? Promise.resolve();
@@ -315,6 +322,7 @@ export class QuestService {
   }
 
   private async onInit(quest: Quest, npc: Npc, worktreePath: string, info: { sessionId: string; permissionMode: string }): Promise<void> {
+    this.liveSessions.set(quest.id, info.sessionId);
     try {
       const existing = await this.deps.repos.sessions.get(info.sessionId);
       await this.deps.repos.sessions.put({
@@ -344,6 +352,7 @@ export class QuestService {
   ): Promise<void> {
     if (this.runs.get(quest.id) === run) this.runs.delete(quest.id);
     await initHandled;
+    this.liveSessions.delete(quest.id);
     let finished: Quest | undefined;
     try {
       let action: 'finish' | 'interrupt';

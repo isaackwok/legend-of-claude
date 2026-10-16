@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Preflight, Quest } from '@loc/shared';
 import { fakeQuery } from '../../../test/fakeQuery.js';
 import { ApprovalBroker } from '../../agent/approvals.js';
+import { ChatService } from '../../chats/service.js';
 import { ClerkService } from '../../clerk/clerk.js';
 import { loadConfig, type Config } from '../../config.js';
 import { seedNpcs } from '../../npcs/seeds.js';
@@ -48,7 +49,8 @@ beforeEach(async () => {
   const sessionStore = new FileSessionStore(join(dataDir, 'sessions'));
   quests = new QuestService({ repos, hub, broker, queryFn: fakeQuery(script).fn, dataDir, sessionStore, env: {} });
   const clerk = new ClerkService({ repos, hub, broker, queryFn: fakeQuery([]).fn, dataDir, sessionStore, quests, env: {} });
-  app = createApp({ config, repos, hub, getSnapshot: () => buildSnapshot(repos, preflight, broker.list()), getPreflight: () => preflight, quests, broker, clerk });
+  const chats = new ChatService({ repos, hub, broker, queryFn: fakeQuery([]).fn, dataDir, sessionStore, env: {} });
+  app = createApp({ config, repos, hub, getSnapshot: () => buildSnapshot(repos, preflight, broker.list()), getPreflight: () => preflight, quests, broker, clerk, chats, sessionStore });
 });
 afterEach(() => rm(tmp, { recursive: true, force: true }));
 

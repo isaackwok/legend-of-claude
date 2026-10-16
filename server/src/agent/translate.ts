@@ -87,7 +87,7 @@ function blocksOf(content: unknown): Block[] {
 }
 
 /** Text of a tool_result `content`: a string, or the text of its text blocks. */
-function resultText(content: unknown): string {
+export function resultText(content: unknown): string {
   if (typeof content === 'string') return content;
   return blocksOf(content)
     .filter((b) => b.type === 'text' && typeof b['text'] === 'string')

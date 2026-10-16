@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Dungeon, ServerMessage } from '@loc/shared';
 import { fakeQuery } from '../../test/fakeQuery.js';
 import { ApprovalBroker } from '../agent/approvals.js';
+import { ChatService } from '../chats/service.js';
 import { ClerkService } from '../clerk/clerk.js';
 import { loadConfig, type Config } from '../config.js';
 import { createApp } from '../http/app.js';
@@ -103,6 +104,7 @@ describe('/api/dungeons', () => {
     const sessionStore = new FileSessionStore(join(dir, 'sessions'));
     const quests = new QuestService({ repos, hub, broker, queryFn: fakeQuery([]).fn, dataDir: dir, sessionStore });
     const clerk = new ClerkService({ repos, hub, broker, queryFn: fakeQuery([]).fn, dataDir: dir, sessionStore, quests });
+    const chats = new ChatService({ repos, hub, broker, queryFn: fakeQuery([]).fn, dataDir: dir, sessionStore });
     app = createApp({
       config,
       repos,
@@ -112,6 +114,8 @@ describe('/api/dungeons', () => {
       quests,
       broker,
       clerk,
+      chats,
+      sessionStore,
     });
   });
 

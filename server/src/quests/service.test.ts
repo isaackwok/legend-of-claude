@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InvalidTransitionError, type Quest, type ServerMessage } from '@loc/shared';
 import { fakeQuery, type FakeStep } from '../../test/fakeQuery.js';
 import { ApprovalBroker } from '../agent/approvals.js';
@@ -187,6 +187,17 @@ describe('QuestService', () => {
     expect((await r.npcs.get('alex'))!.busyQuestId).toBeUndefined();
     await expect(svc.message(q.id, '還在嗎')).rejects.toThrow(ConflictError);
     await expect(svc.recall(q.id)).rejects.toThrow(ConflictError);
+  });
+
+  it('liveSessionIds lists the session of a running adventure only while it runs', async () => {
+    const svc = service(fakeQuery([init(), waitForMessage, success()]).fn);
+    const q = await svc.create({ title: '修好登入', body: '' });
+    expect(svc.liveSessionIds()).toEqual([]);
+    await svc.start(q.id, { npcId: 'alex', dungeonId: 'd1' });
+    // The session id is only known once the SDK sent init.
+    await vi.waitFor(() => expect(svc.liveSessionIds()).toEqual(['s-1']));
+    await svc.recall(q.id);
+    expect(svc.liveSessionIds()).toEqual([]);
   });
 
   it('a failed run returns the quest to open with 冒險失敗', async () => {
