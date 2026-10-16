@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Quest } from '@loc/shared';
 import {
   BranchExistsError,
+  WorktreePathExistsError,
   branchName,
   commitIfDirty,
   createWorktree,
@@ -97,6 +98,31 @@ describe('createWorktree', () => {
     await git(repo, 'branch', 'loc/q4');
     await expect(createWorktree(repo, dataDir, 'loc/q4')).rejects.toBeInstanceOf(BranchExistsError);
     await expect(stat(join(dataDir, 'worktrees'))).rejects.toThrow();
+  });
+
+  it('throws WorktreePathExistsError for an occupied path and creates no branch', async () => {
+    const occupied = join(dataDir, 'worktrees', 'loc-q6');
+    await mkdir(occupied, { recursive: true });
+    await writeFile(join(occupied, 'keep.txt'), 'x');
+    const err = await createWorktree(repo, dataDir, 'loc/q6').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(WorktreePathExistsError);
+    expect((err as Error).message).toBe(`工作目錄 ${occupied} 已存在`);
+    expect(await git(repo, 'branch', '--list', 'loc/q6')).toBe('');
+    expect(await readFile(join(occupied, 'keep.txt'), 'utf8')).toBe('x');
+    // retrying reports the path problem again, not a misleading BranchExistsError
+    await expect(createWorktree(repo, dataDir, 'loc/q6')).rejects.toBeInstanceOf(WorktreePathExistsError);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('removes the new branch when worktree add fails after creating it', async () => {
+    await mkdir(join(dataDir, 'worktrees'), { recursive: true });
+    await chmod(join(dataDir, 'worktrees'), 0o500); // git cannot create the worktree dir
+    try {
+      await expect(createWorktree(repo, dataDir, 'loc/q7')).rejects.toThrow(/worktree/);
+    } finally {
+      await chmod(join(dataDir, 'worktrees'), 0o700);
+    }
+    expect(await git(repo, 'branch', '--list', 'loc/q7')).toBe('');
+    await expect(createWorktree(repo, dataDir, 'loc/q7')).resolves.toBeDefined();
   });
 
   it('uses the commit sha as baseBranch when HEAD is detached', async () => {

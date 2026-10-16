@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, stat } from 'node:fs/promises';
+import { lstat, mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Quest } from '@loc/shared';
 
@@ -14,6 +14,13 @@ export class BranchExistsError extends Error {
   }
 }
 
+export class WorktreePathExistsError extends Error {
+  constructor(public readonly path: string) {
+    super(`工作目錄 ${path} 已存在`);
+    this.name = 'WorktreePathExistsError';
+  }
+}
+
 interface GitResult {
   code: number;
   stdout: string;
@@ -25,7 +32,7 @@ function runGit(cwd: string, args: string[], timeout = GIT_TIMEOUT_MS): Promise<
   return new Promise((resolve, reject) => {
     execFile('git', args, { cwd, timeout, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (!err) return resolve({ code: 0, stdout, stderr });
-      const e = err as NodeJS.ErrnoException & { code?: number | string; killed?: boolean };
+      const e = err as Error & { code?: number | string };
       if (typeof e.code === 'number') return resolve({ code: e.code, stdout, stderr });
       reject(new Error(`git ${args[0]} 執行失敗：${stderr.trim() || e.message}`));
     });
@@ -61,11 +68,29 @@ export async function createWorktree(
   const baseBranch = sym.code === 0 && sym.stdout.trim() ? sym.stdout.trim() : baseSha;
 
   const root = join(dataDir, 'worktrees');
+  const worktreePath = join(root, branch.replaceAll('/', '-'));
+  // Checked before any mutation: git would create the branch first and then fail on the occupied path.
+  if (await pathExists(worktreePath)) throw new WorktreePathExistsError(worktreePath);
+
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   await mkdir(root, { recursive: true, mode: 0o700 });
-  const worktreePath = join(root, branch.replaceAll('/', '-'));
-  await git(repoPath, ['worktree', 'add', '-b', branch, worktreePath, baseSha]);
+  try {
+    await git(repoPath, ['worktree', 'add', '-b', branch, worktreePath, baseSha]);
+  } catch (err) {
+    // `worktree add -b` may have created the branch before failing; it did not exist before, so remove it.
+    await runGit(repoPath, ['branch', '-D', branch]).catch(() => undefined);
+    throw err;
+  }
   return { worktreePath, baseBranch };
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function hasIdentity(cwd: string): Promise<boolean> {
