@@ -35,7 +35,16 @@ const hub = new WsHub(getSnapshot);
 broker.onChange((msg) => hub.broadcast(msg));
 
 const sessionStore = new FileSessionStore(join(config.dataDir, 'sessions'));
-const quests = new QuestService({ repos, hub, broker, queryFn: realQueryFn, dataDir: config.dataDir, sessionStore });
+// The clerk is created below; launches only call this after startup has finished.
+const quests = new QuestService({
+  repos,
+  hub,
+  broker,
+  queryFn: realQueryFn,
+  dataDir: config.dataDir,
+  sessionStore,
+  ensureInventory: () => clerk.ensureInventory(),
+});
 // Nothing is running yet: quests left adventuring by the last run go back to open before serving.
 await quests.recoverInterrupted();
 
@@ -52,4 +61,11 @@ hub.attach(server, config);
 void runPreflight(realQueryFn, { dataDir: config.dataDir }).then((result) => {
   preflightState.set(result);
   for (const w of result.warnings) console.warn(`[啟動檢查] ${w}`);
+  // 倉庫盤點 once logged in, so NPC connector equipment is enforced (without an inventory nothing is denied).
+  if (result.loggedIn) {
+    clerk.refreshInventory().then(
+      (connectors) => console.log(`[倉庫盤點] 找到 ${connectors.length} 個 connector`),
+      (err: unknown) => console.warn(`[倉庫盤點] 失敗：${err instanceof Error ? err.message : String(err)}`),
+    );
+  }
 });

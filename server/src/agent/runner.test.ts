@@ -144,4 +144,31 @@ describe('AgentRun', () => {
     expect(out.sessionId).toBe('s-1');
     expect(out.errors?.length).toBe(1);
   });
+
+  it('beforePrompt runs with the query first; the prompt is sent only after it resolves', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let seenQuery: unknown;
+    const { fake, run } = start([{ waitForInput: 1 }, init, success], {
+      beforePrompt: async (q) => {
+        seenQuery = q;
+        await gate;
+      },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(seenQuery).toBeDefined();
+    expect(fake.inputs).toEqual([]);
+    release();
+    expect((await run.done).ok).toBe(true);
+    expect(fake.inputs.map((m) => m.message.content)).toEqual(['修好測試']);
+  });
+
+  it('a rejecting beforePrompt never sends the prompt and ends not ok with its message', async () => {
+    const { fake, events, run } = start([{ waitForInput: 1 }, init, success], { beforePrompt: () => Promise.reject(new Error('連線尚未就緒')) });
+    const out = await run.done;
+    expect(out).toMatchObject({ ok: false, errors: ['連線尚未就緒'] });
+    expect(fake.inputs).toEqual([]);
+    expect(fake.closed).toBe(true);
+    expect(events.at(-1)).toMatchObject({ kind: 'error', detail: '連線尚未就緒' });
+  });
 });

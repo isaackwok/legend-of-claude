@@ -16,13 +16,19 @@ export interface Quest {
   status: QuestStatus; source: QuestSource;
   npcId?: string; dungeonId?: string; branch?: string; worktreePath?: string; baseBranch?: string;
   sessionId?: string; scroll?: string; rejections: number;
-  settlement?: SettlementRecord; createdAt: number; updatedAt: number;
+  settlement?: SettlementRecord;
+  lastSettlementAttempt?: SettlementRecord;    // R35: 推送或開 PR 失敗、委託留在待驗收時的那次結算
+  createdAt: number; updatedAt: number;
 }
 export type QuestAction = 'start' | 'finish' | 'interrupt' | 'reject' | 'accept' | 'abandon';
 export interface Approval { id: string; npcId: string; questId?: string; sessionId: string; toolName: string; summary: string; reason?: string; createdAt: number }
 export type GameEventKind = 'text' | 'tool_start' | 'tool_end' | 'compact' | 'subagent_start' | 'subagent_end' | 'background_start' | 'background_end' | 'result' | 'error';
 export interface GameEvent { id: string; sessionId: string; npcId: string; questId?: string; at: number; kind: GameEventKind; label: string; detail?: string; toolUseId?: string; parentToolUseId?: string | null }
 export interface SettlementChoices { pushAndPr: boolean; jiraTransitionId?: string; jiraComment?: string; linkPr: boolean; openTicket: boolean }
-export interface SettlementRecord { choices: SettlementChoices; prUrl?: string; results: { action: string; ok: boolean; message: string }[]; at: number }
+export interface SettlementRecord {
+  choices: SettlementChoices; prUrl?: string; results: { action: string; ok: boolean; message: string }[]; at: number;
+  branch?: string; worktreePath?: string;
+  accepted?: boolean;                           // R35: false = 推送或開 PR 失敗，委託仍在待驗收（舊紀錄沒有此欄＝已驗收）
+}
 export interface SessionIndexEntry { id: string /* sessionId */; npcId: string; questId?: string; title: string; cwd: string; updatedAt: number; costUsd?: number /* latest session-cumulative total, never summed */ }
 export interface Settings { id: 'settings'; scanRoot: string /* 初值 ~/dev */; lastSettlement?: SettlementChoices; connectors?: { name: string; prefix: string; status: string }[] }

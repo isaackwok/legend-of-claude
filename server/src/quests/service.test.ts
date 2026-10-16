@@ -14,6 +14,7 @@ import { createWorktree, worktreeExists } from '../git/worktree.js';
 import { seedNpcs } from '../npcs/seeds.js';
 import { FileSessionStore } from '../store/fileSessionStore.js';
 import { repos as makeRepos, type Repos } from '../store/jsonRepo.js';
+import { getSettings, updateSettings } from '../store/settings.js';
 import { handoverBrief, questBrief, questInstructions } from './prompts.js';
 import { ConflictError, NotFoundError, NpcBusyError, QuestService, ValidationError } from './service.js';
 
@@ -47,7 +48,7 @@ beforeEach(async () => {
 });
 afterEach(() => rm(tmp, { recursive: true, force: true }));
 
-function service(queryFn: QueryFn): QuestService {
+function service(queryFn: QueryFn, extra: { ensureInventory?: () => Promise<void> } = {}): QuestService {
   return new QuestService({
     repos: r,
     hub: { broadcast: (m) => void messages.push(m) },
@@ -56,6 +57,7 @@ function service(queryFn: QueryFn): QuestService {
     dataDir,
     sessionStore: new FileSessionStore(join(dataDir, 'sessions')),
     env: {},
+    ...extra,
   });
 }
 
@@ -268,7 +270,7 @@ describe('QuestService', () => {
     expect(linaFake.calls[0]!.resume).toBeUndefined();
     expect(linaFake.calls[0]!.cwd).toBe(first.worktreePath);
     const dungeon = (await r.dungeons.get('d1'))!;
-    expect(promptText(linaFake.inputs[0])).toBe(`${questBrief(q, dungeon)}\n\n先前冒險的卷軸：\n已被召回`);
+    expect(promptText(linaFake.inputs[0])).toBe(`${questBrief(q, dungeon)}\n\n先前冒險的卷軸：\n已被召回\n\n已被召回`);
     await svc.settled(q.id);
 
     expect(await r.quests.get(q.id)).toMatchObject({ status: 'review', npcId: 'lina', sessionId: 's-lina' });
@@ -316,6 +318,98 @@ describe('QuestService', () => {
     expect(reviewAt).toBeGreaterThan(-1);
     expect(freedAt).toBeGreaterThan(-1);
     expect(freedAt).toBeLessThan(reviewAt);
+  });
+
+  it('recall and failure append to the existing scroll instead of replacing it', async () => {
+    const fail = { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['boom'], total_cost_usd: 0.1, session_id: 's-1' };
+    const svc = service(sequence(fakeQuery([init(), success()]).fn, fakeQuery([init(), waitForMessage, success()]).fn, fakeQuery([init(), fail]).fn));
+    const q = await svc.create({ title: '修好登入', body: '' });
+    await svc.start(q.id, { npcId: 'alex', dungeonId: 'd1' });
+    await svc.settled(q.id);
+    const review = (await r.quests.get(q.id))!.scroll!;
+    expect(review).toContain('修好了登入按鈕');
+
+    await svc.reject(q.id, '測試沒過');
+    await svc.recall(q.id);
+    expect((await r.quests.get(q.id))!.scroll).toBe(`${review}\n\n已被召回`);
+
+    await svc.start(q.id, { npcId: 'alex', dungeonId: 'd1' });
+    await svc.settled(q.id);
+    expect((await r.quests.get(q.id))!.scroll).toBe(`${review}\n\n已被召回\n\n冒險失敗：boom`);
+  });
+
+  it('refuses to send the builtin clerk on a quest', async () => {
+    const fake = fakeQuery([init(), success()]);
+    const svc = service(fake.fn);
+    const q = await svc.create({ title: '修好登入', body: '' });
+    const err = await svc.start(q.id, { npcId: 'clerk', dungeonId: 'd1' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect((err as ValidationError).status).toBe(400);
+    expect((err as Error).message).toBe('公會櫃檯不接一般委託');
+    expect(fake.calls).toHaveLength(0);
+    expect(await r.quests.get(q.id)).toMatchObject({ status: 'open' });
+    expect((await r.quests.get(q.id))!.worktreePath).toBeUndefined();
+    // The clerk claim was released: alex can still go.
+    await svc.start(q.id, { npcId: 'alex', dungeonId: 'd1' });
+    await svc.settled(q.id);
+  });
+
+  it('a takeover clears the previous npc session at once, so a pre-init failure never lets the new npc resume it (R26)', async () => {
+    const alex = fakeQuery([init('auto', 's-alex'), waitForMessage, success('s-alex')]);
+    const linaDies = fakeQuery([]); // ends before init, without a result
+    const linaAgain = fakeQuery([init('auto', 's-lina'), success('s-lina')]);
+    const svc = service(sequence(alex.fn, linaDies.fn, linaAgain.fn));
+    const q = await svc.create({ title: '修好登入', body: '' });
+    await svc.start(q.id, { npcId: 'alex', dungeonId: 'd1' });
+    await vi.waitFor(async () => expect((await r.quests.get(q.id))!.sessionId).toBe('s-alex'));
+    await svc.recall(q.id);
+
+    const takenOver = await svc.start(q.id, { npcId: 'lina', dungeonId: 'd1' });
+    expect(takenOver.npcId).toBe('lina');
+    expect('sessionId' in takenOver).toBe(false);
+    await svc.settled(q.id);
+    const failed = (await r.quests.get(q.id))!;
+    expect(failed).toMatchObject({ status: 'open', npcId: 'lina' });
+    expect(failed.sessionId).toBeUndefined();
+
+    await svc.start(q.id, { npcId: 'lina', dungeonId: 'd1' });
+    expect(linaAgain.calls[0]!.resume).toBeUndefined();
+    await svc.settled(q.id);
+    expect(await r.quests.get(q.id)).toMatchObject({ status: 'review', sessionId: 's-lina' });
+  });
+
+  it('takes inventory before launching when none exists, so unequipped connectors are denied', async () => {
+    let calls = 0;
+    const ensureInventory = async () => {
+      calls++;
+      await updateSettings(r, { connectors: [{ name: 'claude.ai Slack', prefix: 'claude_ai_Slack', status: 'connected' }] });
+    };
+    const fake = fakeQuery([init(), success()]);
+    const svc = service(fake.fn, { ensureInventory });
+    const q = await svc.create({ title: '修好登入', body: '' });
+    await svc.start(q.id, { npcId: 'alex', dungeonId: 'd1' });
+    await svc.settled(q.id);
+    expect(calls).toBe(1);
+    expect(fake.calls[0]!.disallowedTools).toContain('mcp__claude_ai_Slack__*');
+
+    // Once an inventory exists it is not taken again.
+    const q2 = await svc.create({ title: '二', body: '' });
+    await svc.start(q2.id, { npcId: 'alex', dungeonId: 'd1' });
+    await svc.settled(q2.id);
+    expect(calls).toBe(1);
+  });
+
+  it('still launches when taking inventory fails, with a warning', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const fake = fakeQuery([init(), success()]);
+    const svc = service(fake.fn, { ensureInventory: async () => Promise.reject(new Error('CLI 不見了')) });
+    const q = await svc.create({ title: '修好登入', body: '' });
+    await svc.start(q.id, { npcId: 'alex', dungeonId: 'd1' });
+    await svc.settled(q.id);
+    expect((await r.quests.get(q.id))!.status).toBe('review');
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('CLI 不見了'))).toBe(true);
+    expect((await getSettings(r)).connectors).toBeUndefined();
+    warn.mockRestore();
   });
 
   it('recoverInterrupted reopens adventuring quests, frees npcs, keeps the worktree, and resumes the session', async () => {

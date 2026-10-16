@@ -14,6 +14,7 @@ import { QuestService } from '../../quests/service.js';
 import { buildSnapshot } from '../../snapshot.js';
 import { FileSessionStore } from '../../store/fileSessionStore.js';
 import { repos as makeRepos, type Repos } from '../../store/jsonRepo.js';
+import { updateSettings } from '../../store/settings.js';
 import { createApp } from '../app.js';
 
 const preflight: Preflight = { ignoredEnvVars: [], loggedIn: true, warnings: [] };
@@ -30,6 +31,8 @@ beforeEach(async () => {
   config = loadConfig({ LOC_DATA_DIR: dataDir });
   repos = makeRepos(dataDir);
   for (const npc of seedNpcs()) await repos.npcs.put(npc);
+  // An (empty) inventory exists: clerk runs neither take inventory nor wait for connectors.
+  await updateSettings(repos, { connectors: [] });
 });
 afterEach(() => rm(tmp, { recursive: true, force: true }));
 
@@ -153,5 +156,18 @@ describe('settlement routes', () => {
     expect(record.results).toEqual([{ action: 'jiraComment', ok: true, message: '已在 ABC-1 留言' }]);
     expect(record.choices).toEqual({ pushAndPr: false, jiraComment: '完成', linkPr: false, openTicket: true });
     expect((await repos.quests.get(review.id))!.status).toBe('done');
+  });
+
+  it('POST settle answers 200 with the record but keeps the quest in review when the push fails (R35)', async () => {
+    const req = appWith(fakeQuery(structured({ ok: true, error: null })).fn);
+    const review = await jiraQuest('review'); // no dungeon / branch: the push step fails
+    const res = await req(`/api/quests/${review.id}/settle`, { pushAndPr: true, linkPr: false, openTicket: false });
+    expect(res.status).toBe(200);
+    const record = (await res.json()) as { accepted: boolean; results: { action: string; ok: boolean }[] };
+    expect(record.accepted).toBe(false);
+    expect(record.results[0]).toMatchObject({ action: 'pushAndPr', ok: false });
+    const kept = (await repos.quests.get(review.id))!;
+    expect(kept.status).toBe('review');
+    expect(kept.lastSettlementAttempt).toEqual(record);
   });
 });

@@ -28,6 +28,11 @@ export interface AgentRunParams {
   questId?: string;
   broker: ApprovalBroker;
   onEvent: (e: GameEvent) => void;
+  /**
+   * Runs once the query exists and before the prompt is sent (e.g. waiting for connectors to connect).
+   * If it rejects, the prompt is never sent and the run ends failed with the rejection's message.
+   */
+  beforePrompt?: (query: Query) => Promise<void>;
 }
 
 /** Async push-queue used as the streaming prompt. Items pushed before `end()` are still delivered. */
@@ -112,6 +117,7 @@ export class AgentRun {
   private resolveInit!: (v: { sessionId: string; permissionMode: string }) => void;
   private rejectInit!: (e: Error) => void;
   private initSeen = false;
+  private prepError: string | undefined;
 
   private constructor(private readonly params: AgentRunParams) {
     this.init = new Promise((resolve, reject) => {
@@ -119,7 +125,7 @@ export class AgentRun {
       this.rejectInit = reject;
     });
     this.init.catch(() => {});
-    this.input.push(userMessage(params.prompt));
+    if (!params.beforePrompt) this.input.push(userMessage(params.prompt));
     this.done = this.run();
   }
 
@@ -214,6 +220,7 @@ export class AgentRun {
     let costUsd = 0;
     try {
       this.query = this.params.queryFn({ prompt: this.input, options: { ...this.params.options, canUseTool: this.canUseTool } });
+      if (this.params.beforePrompt) this.prepare(this.params.beforePrompt, this.query);
       for await (const msg of this.query) {
         if (msg.type === 'system' && msg.subtype === 'init') {
           this.sessionId = msg.session_id;
@@ -246,10 +253,28 @@ export class AgentRun {
       this.emitError(RECALLED);
       return { ok: false, errors: [RECALLED], sessionId: this.sessionId, costUsd };
     }
+    if (this.prepError !== undefined && !outcome) {
+      this.emitError(this.prepError);
+      return { ok: false, errors: [this.prepError], sessionId: this.sessionId, costUsd };
+    }
     if (outcome) return outcome;
     const detail = thrown ?? '冒險在沒有回報的情況下結束';
     this.emitError(detail);
     return { ok: false, errors: [detail], sessionId: this.sessionId, costUsd };
+  }
+
+  /** Sends the prompt once `beforePrompt` resolves; on rejection ends the input and stops the query. */
+  private prepare(beforePrompt: (query: Query) => Promise<void>, query: Query): void {
+    beforePrompt(query).then(
+      () => {
+        if (!this.input.isEnded) this.input.push(userMessage(this.params.prompt));
+      },
+      (err: unknown) => {
+        this.prepError = errorText(err);
+        this.input.end();
+        this.closeQuery();
+      },
+    );
   }
 
   private outcomeOf(msg: Extract<SDKMessage, { type: 'result' }>): RunOutcome {

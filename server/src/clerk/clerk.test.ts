@@ -45,6 +45,8 @@ beforeEach(async () => {
   for (const npc of seedNpcs()) await r.npcs.put(npc);
   await r.dungeons.put({ id: 'd1', name: 'repo', path: repo, githubRepo: 'acme/repo', defaultBranch: 'main' });
   await r.dungeons.put({ id: 'd2', name: 'local-only', path: repo, defaultBranch: 'main' });
+  // An inventory (empty) exists unless a test says otherwise: no inventory run, no connector wait.
+  await updateSettings(r, { connectors: [] });
   messages = [];
 });
 afterEach(() => rm(tmp, { recursive: true, force: true }));
@@ -140,6 +142,10 @@ async function reviewQuest(opts: { source?: QuestSource; dungeonId?: string } = 
   return ready;
 }
 
+const connected = (n: string): McpServerStatus => ({ name: `claude.ai ${n}`, status: 'connected', scope: 'claudeai', source: 'claudeai' });
+const pending = (n: string): McpServerStatus => ({ name: `claude.ai ${n}`, status: 'pending', scope: 'claudeai', source: 'claudeai' });
+const inventoryOf = (...names: string[]) => names.map((n) => ({ name: `claude.ai ${n}`, prefix: `claude_ai_${n}`, status: 'connected' }));
+
 const jiraSource: QuestSource = { kind: 'jira', key: 'ABC-12', url: 'https://acme.atlassian.net/browse/ABC-12' };
 
 describe('starsFrom', () => {
@@ -167,11 +173,9 @@ describe('starsFrom', () => {
 
 describe('ClerkService.importJiraIssue', () => {
   it('creates a jira quest with stars from story points, in the guildhall, without a session index entry', async () => {
-    const fake = fakeQuery(structured(issue));
+    const fake = fakeQuery(structured(issue), { mcpServerStatus: [[connected('Atlassian')]] });
     const clerk = clerkWith(fake.fn);
-    await updateSettings(r, {
-      connectors: ['Atlassian', 'GitHub', 'Gmail', 'Slack'].map((n) => ({ name: `claude.ai ${n}`, prefix: `claude_ai_${n}`, status: 'connected' })),
-    });
+    await updateSettings(r, { connectors: inventoryOf('Atlassian', 'GitHub', 'Gmail', 'Slack') });
     const { quest, created } = await clerk.importJiraIssue(' abc-12 ');
     expect(created).toBe(true);
 
@@ -193,6 +197,7 @@ describe('ClerkService.importJiraIssue', () => {
     expect(opts.permissionMode).toBe('auto');
     expect(opts.disallowedTools).toContain('Bash(git push *)');
     expect(opts.disallowedTools).toContain('Bash');
+    expect(opts.disallowedTools).toEqual(expect.arrayContaining(['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'Agent', 'TodoWrite', 'Bash(gh pr *)']));
     expect(opts.disallowedTools?.filter((t) => t.startsWith('mcp__'))).toEqual(['mcp__claude_ai_Gmail__*', 'mcp__claude_ai_Slack__*']);
     expect(promptOf(fake)).toContain('ABC-12');
     expect(promptOf(fake)).toContain('只讀不改');
@@ -351,6 +356,7 @@ describe('ClerkService.settle', () => {
 
     expect(record.prUrl).toBe('https://github.com/acme/repo/pull/7');
     expect(record.choices).toEqual(all);
+    expect(record).toMatchObject({ accepted: true, branch: q.branch, worktreePath: q.worktreePath });
     expect(record.results.map((x) => [x.action, x.ok])).toEqual([
       ['pushAndPr', true],
       ['jiraTransition', true],
@@ -384,6 +390,37 @@ describe('ClerkService.settle', () => {
       ['jiraComment', true],
       ['linkPr', false],
     ]);
+    // R35: the push/PR failed, so the quest stays in review with the attempt recorded and broadcast.
+    expect(record).toMatchObject({ accepted: false, branch: q.branch, worktreePath: q.worktreePath });
+    const kept = (await r.quests.get(q.id))!;
+    expect(kept.status).toBe('review');
+    expect(kept.settlement).toBeUndefined();
+    expect(kept.lastSettlementAttempt).toEqual(record);
+    expect(messages).toContainEqual({ type: 'quest', quest: kept });
+    expect((await getSettings(r)).lastSettlement).toEqual(all);
+  });
+
+  it('a quest kept in review after a failed push can be settled again, and is then accepted (R35)', async () => {
+    const clerk = clerkWith(sequence(fakeQuery(failing('GitHub 掛了')), fakeQuery(structured({ prUrl: 'https://github.com/acme/repo/pull/8', error: null }))));
+    const q = await reviewQuest();
+    const choices: SettlementChoices = { pushAndPr: true, linkPr: false, openTicket: false };
+    expect((await clerk.settle(q.id, choices)).accepted).toBe(false);
+    expect((await r.quests.get(q.id))!.status).toBe('review');
+
+    const second = await clerk.settle(q.id, choices);
+    expect(second).toMatchObject({ accepted: true, prUrl: 'https://github.com/acme/repo/pull/8' });
+    const done = (await r.quests.get(q.id))!;
+    expect(done.status).toBe('done');
+    expect(done.settlement).toEqual(second);
+    expect(done.lastSettlementAttempt).toBeUndefined();
+  });
+
+  it('accepts when push/PR was not chosen, even if a jira step fails', async () => {
+    const clerk = clerkWith(fakeQuery(failing('Jira 掛了')).fn);
+    const q = await reviewQuest({ source: jiraSource });
+    const record = await clerk.settle(q.id, { pushAndPr: false, jiraTransitionId: '31', linkPr: false, openTicket: false });
+    expect(record.results).toEqual([expect.objectContaining({ action: 'jiraTransition', ok: false })]);
+    expect(record.accepted).toBe(true);
     expect((await r.quests.get(q.id))!.status).toBe('done');
   });
 
@@ -396,7 +433,7 @@ describe('ClerkService.settle', () => {
 
     expect(record.results).toEqual([{ action: 'pushAndPr', ok: false, message: '這座地下城沒有 GitHub remote' }]);
     expect(fake.calls).toHaveLength(0);
-    expect((await r.quests.get(q.id))!.status).toBe('done');
+    expect((await r.quests.get(q.id))!.status).toBe('review');
   });
 
   it('fails the PR step when the clerk reports a url outside the dungeon repo', async () => {
@@ -406,6 +443,7 @@ describe('ClerkService.settle', () => {
     expect(record.prUrl).toBeUndefined();
     expect(record.results[0]).toMatchObject({ action: 'pushAndPr', ok: false });
     expect(record.results[0]!.message).toContain('https://github.com/evil/repo/pull/7');
+    expect((await r.quests.get(q.id))!.status).toBe('review');
   });
 
   it('refuses a non-numeric transition id before doing anything', async () => {
@@ -534,5 +572,85 @@ describe('ClerkService.refreshInventory', () => {
     await expect(clerk.refreshInventory()).rejects.toBeInstanceOf(ClerkError);
     expect(fake.closed).toBe(true);
     expect((await getSettings(r)).connectors).toEqual(old);
+  });
+});
+
+describe('ClerkService inventory on demand', () => {
+  const status = (name: string, st: McpServerStatus['status']): McpServerStatus => ({ name, status: st, scope: 'claudeai', source: 'claudeai' });
+  const noInventory = () => r.settings.put({ id: 'settings', scanRoot: '/tmp' });
+
+  it('a clerk run takes inventory first when none exists, inside its own queue turn (no deadlock)', async () => {
+    await noInventory();
+    const listed = [status('claude.ai Atlassian', 'connected'), status('claude.ai Slack', 'connected')];
+    const inventory = fakeQuery([], { mcpServerStatus: [listed, listed] });
+    const importer = fakeQuery(structured(issue), { mcpServerStatus: [[connected('Atlassian')]] });
+    const clerk = clerkWith(sequence(inventory, importer));
+
+    const { quest } = await clerk.importJiraIssue('ABC-12');
+    expect(quest.source).toMatchObject({ key: 'ABC-12' });
+    expect(inventory.closed).toBe(true);
+    expect(inventory.inputs).toEqual([]);
+    expect((await getSettings(r)).connectors?.map((c) => c.prefix)).toEqual(['claude_ai_Atlassian', 'claude_ai_Slack']);
+    expect(importer.calls[0]!.disallowedTools).toContain('mcp__claude_ai_Slack__*');
+    expect(importer.calls[0]!.disallowedTools).not.toContain('mcp__claude_ai_Atlassian__*');
+  });
+
+  it('ensureInventory runs once for concurrent callers and not at all once an inventory exists', async () => {
+    await noInventory();
+    const listed = [status('claude.ai Slack', 'connected')];
+    const fake = fakeQuery([], { mcpServerStatus: [listed, listed] });
+    const clerk = clerkWith(fake.fn);
+    await Promise.all([clerk.ensureInventory(), clerk.ensureInventory(), clerk.refreshInventory()]);
+    expect(fake.calls).toHaveLength(1);
+    await clerk.ensureInventory();
+    expect(fake.calls).toHaveLength(1);
+    expect(await clerk.inventory()).toEqual([{ name: 'claude.ai Slack', prefix: 'claude_ai_Slack', status: 'connected' }]);
+  });
+});
+
+describe('ClerkService connector readiness', () => {
+  it('sends the prompt only once the needed connector reports connected', async () => {
+    await updateSettings(r, { connectors: inventoryOf('Atlassian', 'GitHub') });
+    const fake = fakeQuery(structured(issue), { mcpServerStatus: [[], [pending('Atlassian'), pending('GitHub')], [connected('Atlassian'), pending('GitHub')]] });
+    const clerk = clerkWith(fake.fn);
+    const { quest } = await clerk.importJiraIssue('ABC-12');
+    expect(quest.title).toBe('登入按鈕沒反應');
+    expect(fake.statusPolls).toBe(3);
+    expect(fake.inputs).toHaveLength(1);
+  });
+
+  it('fails with a retry hint, without sending the prompt, when the connector never connects', async () => {
+    await updateSettings(r, { connectors: inventoryOf('Atlassian') });
+    const fake = fakeQuery(structured(issue), { mcpServerStatus: [[pending('Atlassian')]] });
+    const clerk = clerkWith(fake.fn, { pollMs: 5, timeoutMs: 60 });
+    const err = await clerk.importJiraIssue('ABC-12').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ClerkError);
+    expect((err as ClerkError).message).toBe('Jira/GitHub 連線尚未就緒，請稍後再試');
+    expect((err as ClerkError).status).toBe(502);
+    expect(fake.inputs).toEqual([]);
+    expect(fake.closed).toBe(true);
+    expect(await r.quests.list()).toEqual([]);
+  });
+
+  it('gives up at once when the connector needs auth', async () => {
+    await updateSettings(r, { connectors: inventoryOf('Atlassian') });
+    const fake = fakeQuery(structured(issue), { mcpServerStatus: [[{ ...pending('Atlassian'), status: 'needs-auth' }]] });
+    const clerk = clerkWith(fake.fn, { pollMs: 5, timeoutMs: 5000 });
+    const started = Date.now();
+    await expect(clerk.importJiraIssue('ABC-12')).rejects.toThrow('Jira/GitHub 連線尚未就緒，請稍後再試');
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(fake.inputs).toEqual([]);
+  });
+
+  it('the PR step waits for GitHub; if it never connects the step fails and the quest stays in review', async () => {
+    await updateSettings(r, { connectors: inventoryOf('Atlassian', 'GitHub') });
+    const pr = fakeQuery(structured({ prUrl: 'https://github.com/acme/repo/pull/7', error: null }), { mcpServerStatus: [[connected('Atlassian'), pending('GitHub')]] });
+    const clerk = clerkWith(pr.fn, { pollMs: 5, timeoutMs: 60 });
+    const q = await reviewQuest();
+    const record = await clerk.settle(q.id, { pushAndPr: true, linkPr: false, openTicket: false });
+    expect(record.results[0]).toMatchObject({ action: 'pushAndPr', ok: false });
+    expect(record.results[0]!.message).toContain('Jira/GitHub 連線尚未就緒，請稍後再試');
+    expect(pr.inputs).toEqual([]);
+    expect((await r.quests.get(q.id))!.status).toBe('review');
   });
 });

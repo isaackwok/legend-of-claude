@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { McpServerStatus, Options, SDKUserMessage, SessionStore } from '@anthropic-ai/claude-agent-sdk';
+import type { McpServerStatus, Options, Query, SDKUserMessage, SessionStore } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { STATUS_LABEL, type Npc, type Quest, type ServerMessage, type SettlementChoices, type SettlementRecord, type Settings } from '@loc/shared';
 import type { ApprovalBroker } from '../agent/approvals.js';
-import { buildAgentOptions, connectorPrefix, connectorPrefixesFrom, PUSH_DENY } from '../agent/options.js';
+import { buildAgentOptions, clerkConnectors, connectorPrefix, connectorPrefixesFrom, normalizeConnectorPrefix, PUSH_DENY } from '../agent/options.js';
 import type { QueryFn } from '../agent/queryFn.js';
 import { AgentRun } from '../agent/runner.js';
 import { pushBranch } from '../git/worktree.js';
@@ -17,6 +17,12 @@ import { getSettings, updateSettings } from '../store/settings.js';
 export const CLERK_ID = 'clerk';
 export const NO_GITHUB_REMOTE = '這座地下城沒有 GitHub remote';
 const NOT_JIRA = '這個委託不是從 Jira 匯入的';
+export const CONNECTORS_NOT_READY = 'Jira/GitHub 連線尚未就緒，請稍後再試';
+/** Which connector a clerk run needs: its first turn waits until that connector reports connected. */
+type Need = 'jira' | 'github';
+const NEED_PATTERN: Record<Need, RegExp> = { jira: /atlassian|jira/i, github: /github/i };
+/** Connector states that will not become `connected` by waiting. */
+const GIVEN_UP = new Set(['failed', 'needs-auth', 'disabled']);
 const INVENTORY_POLL_MS = 1000;
 /** Spike: claude.ai connectors take about 8 s to connect. */
 const INVENTORY_TIMEOUT_MS = 15_000;
@@ -189,6 +195,8 @@ export class ClerkService {
   private settingsLock: Promise<unknown> = Promise.resolve();
   private readonly settling = new Set<string>();
   private readonly importing = new Map<string, Promise<{ quest: Quest; created: boolean }>>();
+  /** The queued inventory run, shared by every caller until it finishes (single flight). */
+  private inventoryInFlight: Promise<Connector[]> | undefined;
 
   constructor(private readonly deps: ClerkDeps) {}
 
@@ -207,60 +215,81 @@ export class ClerkService {
    * pending) or the timeout passes, then stores them in settings.
    */
   refreshInventory(): Promise<Connector[]> {
-    return this.enqueue(async () => {
-      const npc = await this.clerkNpc();
-      const cwd = await this.guildhall();
-      let release!: () => void;
-      const closed = new Promise<void>((resolve) => (release = resolve));
-      async function* idle(): AsyncGenerator<SDKUserMessage> {
-        await closed;
+    if (!this.inventoryInFlight) {
+      const run = this.enqueue(() => this.takeInventory());
+      this.inventoryInFlight = run;
+      void run.then(
+        () => this.clearInventoryFlight(run),
+        () => this.clearInventoryFlight(run),
+      );
+    }
+    return this.inventoryInFlight;
+  }
+
+  /** Takes inventory only when none was ever taken (`settings.connectors` unset); single flight. */
+  async ensureInventory(): Promise<void> {
+    if ((await getSettings(this.deps.repos)).connectors !== undefined) return;
+    await this.refreshInventory();
+  }
+
+  private clearInventoryFlight(run: Promise<Connector[]>): void {
+    if (this.inventoryInFlight === run) this.inventoryInFlight = undefined;
+  }
+
+  /** The inventory run itself; callers hold the clerk queue (it is a clerk session too). */
+  private async takeInventory(): Promise<Connector[]> {
+    const npc = await this.clerkNpc();
+    const cwd = await this.guildhall();
+    let release!: () => void;
+    const closed = new Promise<void>((resolve) => (release = resolve));
+    async function* idle(): AsyncGenerator<SDKUserMessage> {
+      await closed;
+    }
+    const options: Options = {
+      cwd,
+      model: npc.model,
+      settingSources: ['project', 'local'],
+      permissionMode: 'auto',
+      env: this.env,
+      persistSession: false,
+      disallowedTools: [...PUSH_DENY],
+    };
+    let q: ReturnType<QueryFn> | undefined;
+    try {
+      const pollMs = this.deps.inventoryPollMs ?? INVENTORY_POLL_MS;
+      const deadline = Date.now() + (this.deps.inventoryTimeoutMs ?? INVENTORY_TIMEOUT_MS);
+      q = this.deps.queryFn({ prompt: idle(), options });
+      // Every control request races the deadline: a hung CLI must not block the clerk queue.
+      if ((await beforeDeadline(q.initializationResult(), deadline)) === TIMED_OUT) throw new Error('連線逾時');
+      let previous: Connector[] | undefined;
+      let latest: Connector[] = [];
+      let settled = false;
+      for (;;) {
+        const status = await beforeDeadline(q.mcpServerStatus(), deadline);
+        if (status === TIMED_OUT) break;
+        latest = claudeAiConnectors(status);
+        settled = latest.length > 0 && !latest.some((c) => c.status === 'pending') && sameConnectors(previous, latest);
+        if (settled || Date.now() >= deadline) break;
+        previous = latest;
+        await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
       }
-      const options: Options = {
-        cwd,
-        model: npc.model,
-        settingSources: ['project', 'local'],
-        permissionMode: 'auto',
-        env: this.env,
-        persistSession: false,
-        disallowedTools: [...PUSH_DENY],
-      };
-      let q: ReturnType<QueryFn> | undefined;
+      // An unsettled look (timeout) never replaces an inventory we already have.
+      if (!settled) {
+        const stored = await this.inventory();
+        if (stored.length > 0) return stored;
+      }
+      await this.saveSettings({ connectors: latest });
+      return latest;
+    } catch (err) {
+      throw new ClerkError(`倉庫盤點失敗：${errorText(err)}`, 502);
+    } finally {
+      release();
       try {
-        const pollMs = this.deps.inventoryPollMs ?? INVENTORY_POLL_MS;
-        const deadline = Date.now() + (this.deps.inventoryTimeoutMs ?? INVENTORY_TIMEOUT_MS);
-        q = this.deps.queryFn({ prompt: idle(), options });
-        // Every control request races the deadline: a hung CLI must not block the clerk queue.
-        if ((await beforeDeadline(q.initializationResult(), deadline)) === TIMED_OUT) throw new Error('連線逾時');
-        let previous: Connector[] | undefined;
-        let latest: Connector[] = [];
-        let settled = false;
-        for (;;) {
-          const status = await beforeDeadline(q.mcpServerStatus(), deadline);
-          if (status === TIMED_OUT) break;
-          latest = claudeAiConnectors(status);
-          settled = latest.length > 0 && !latest.some((c) => c.status === 'pending') && sameConnectors(previous, latest);
-          if (settled || Date.now() >= deadline) break;
-          previous = latest;
-          await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
-        }
-        // An unsettled look (timeout) never replaces an inventory we already have.
-        if (!settled) {
-          const stored = await this.inventory();
-          if (stored.length > 0) return stored;
-        }
-        await this.saveSettings({ connectors: latest });
-        return latest;
-      } catch (err) {
-        throw new ClerkError(`倉庫盤點失敗：${errorText(err)}`, 502);
-      } finally {
-        release();
-        try {
-          q?.close();
-        } catch {
-          // already closed
-        }
+        q?.close();
+      } catch {
+        // already closed
       }
-    });
+    }
   }
 
   /**
@@ -289,7 +318,7 @@ export class ClerkService {
   }
 
   private async importNew(key: string): Promise<Quest> {
-    const out = await this.runClerk(importPrompt(key), IssueOutput);
+    const out = await this.runClerk(importPrompt(key), IssueOutput, 'jira');
     if (!out.found) throw new ClerkError(out.error?.trim() || `找不到 ${key}，或 Jira 連線不可用`, 400);
     return this.deps.quests.create({
       title: out.title.trim() || key,
@@ -306,7 +335,7 @@ export class ClerkService {
   }
 
   async getTransitions(key: string): Promise<Transition[]> {
-    const out = await this.runClerk(transitionsPrompt(parseIssueKey(key)), TransitionsOutput);
+    const out = await this.runClerk(transitionsPrompt(parseIssueKey(key)), TransitionsOutput, 'jira');
     if (!out.ok) throw new ClerkError(`查詢 Jira 狀態失敗：${out.error?.trim() || '未知原因'}`, 502);
     return out.transitions;
   }
@@ -321,7 +350,8 @@ export class ClerkService {
 
   /**
    * 結算: push + PR, Jira transition, Jira comment, PR link — each its own clerk run, each recorded;
-   * a failing step never stops the next. Then the quest is accepted (done) with the record.
+   * a failing step never stops the next. Then the quest is accepted (done) with the record — unless a
+   * chosen push / PR failed (R35): then it stays in review with the record as `lastSettlementAttempt`.
    */
   async settle(questId: string, choices: SettlementChoices): Promise<SettlementRecord> {
     if (choices.jiraTransitionId && !TRANSITION_ID.test(choices.jiraTransitionId)) throw new ClerkError('Jira 狀態轉換 id 不正確', 400);
@@ -381,8 +411,19 @@ export class ClerkService {
         }
       }
 
-      const record: SettlementRecord = { choices, results, at: Date.now(), ...(prUrl ? { prUrl } : {}) };
-      await this.deps.quests.accept(questId, record);
+      // R35: a chosen push / PR that failed keeps the quest in review, so it can be fixed and settled again.
+      const pushFailed = choices.pushAndPr && !results.some((x) => x.action === 'pushAndPr' && x.ok);
+      const record: SettlementRecord = {
+        choices,
+        results,
+        at: Date.now(),
+        ...(prUrl ? { prUrl } : {}),
+        ...(quest.branch ? { branch: quest.branch } : {}),
+        ...(quest.worktreePath ? { worktreePath: quest.worktreePath } : {}),
+        accepted: !pushFailed,
+      };
+      if (pushFailed) await this.deps.quests.recordSettlementAttempt(questId, record);
+      else await this.deps.quests.accept(questId, record);
       await this.saveSettings({ lastSettlement: choices });
       return record;
     } finally {
@@ -407,6 +448,7 @@ export class ClerkService {
       const out = await this.runClerk(
         prPrompt({ repo: dungeon.githubRepo, branch: quest.branch, base: quest.baseBranch, title: quest.title, body: quest.scroll ?? '' }),
         PrOutput,
+        'github',
         quest.id,
       );
       const url = out.prUrl?.trim();
@@ -419,16 +461,29 @@ export class ClerkService {
   }
 
   private async runJiraChore(prompt: string, questId: string): Promise<void> {
-    const out = await this.runClerk(prompt, DoneOutput, questId);
+    const out = await this.runClerk(prompt, DoneOutput, 'jira', questId);
     if (!out.ok) throw new ClerkError(out.error?.trim() || '公會櫃檯回報失敗');
   }
 
-  /** One clerk session in the guildhall; the structured output is validated with `schema`. */
-  private runClerk<T>(prompt: string, schema: z.ZodType<T>, questId?: string): Promise<T> {
+  /**
+   * One clerk session in the guildhall; the structured output is validated with `schema`. Takes the
+   * connector inventory first when none exists (already holding the queue, so it runs inline), and
+   * sends the prompt only once the connector it `need`s reports connected.
+   */
+  private runClerk<T>(prompt: string, schema: z.ZodType<T>, need: Need, questId?: string): Promise<T> {
     return this.enqueue(async () => {
       const npc = await this.clerkNpc();
       const cwd = await this.guildhall();
-      const settings = await getSettings(this.deps.repos);
+      let settings = await getSettings(this.deps.repos);
+      if (settings.connectors === undefined) {
+        try {
+          await this.takeInventory();
+        } catch (err) {
+          console.warn(`[倉庫盤點] 公會櫃檯出動前盤點失敗：${errorText(err)}`);
+        }
+        settings = await getSettings(this.deps.repos);
+      }
+      const targets = readinessTargets(connectorPrefixesFrom(settings), need);
       const options = buildAgentOptions({
         npc,
         cwd,
@@ -445,6 +500,7 @@ export class ClerkService {
         ...(questId !== undefined ? { questId } : {}),
         broker: this.deps.broker,
         onEvent: (event) => this.deps.hub.broadcast({ type: 'event', event }),
+        ...(targets.length > 0 ? { beforePrompt: (q: Query) => this.waitForConnectors(q, targets) } : {}),
       });
       let timer: NodeJS.Timeout | undefined;
       const timeout = new Promise<'timeout'>((resolve) => {
@@ -456,11 +512,37 @@ export class ClerkService {
         await run.recall();
         throw new ClerkError('公會櫃檯太久沒有回應');
       }
+      if (!outcome.ok && outcome.errors?.[0] === CONNECTORS_NOT_READY) throw new ClerkError(CONNECTORS_NOT_READY);
       if (!outcome.ok) throw new ClerkError(`公會櫃檯回報失敗：${outcome.errors?.join('；') || '未知原因'}`);
       const parsed = schema.safeParse(outcome.structured);
       if (!parsed.success) throw new ClerkError('公會櫃檯的回報格式不正確');
       return parsed.data;
     });
+  }
+
+  /**
+   * Spike: claude.ai connectors are still connecting on a session's first turn. Polls
+   * `mcpServerStatus()` (same deadline as the inventory) until one of `targets` is connected; throws
+   * CONNECTORS_NOT_READY on timeout, or at once when every target has given up (e.g. needs-auth).
+   */
+  private async waitForConnectors(q: Query, targets: string[]): Promise<void> {
+    const pollMs = this.deps.inventoryPollMs ?? INVENTORY_POLL_MS;
+    const deadline = Date.now() + (this.deps.inventoryTimeoutMs ?? INVENTORY_TIMEOUT_MS);
+    const wanted = new Set(targets.map(normalizeConnectorPrefix));
+    try {
+      if ((await beforeDeadline(q.initializationResult(), deadline)) === TIMED_OUT) throw new Error('timeout');
+      for (;;) {
+        const status = await beforeDeadline(q.mcpServerStatus(), deadline);
+        if (status === TIMED_OUT) throw new Error('timeout');
+        const states = status.filter((s) => wanted.has(connectorPrefix(s.name))).map((s) => s.status);
+        if (states.includes('connected')) return;
+        if (states.length >= wanted.size && states.every((st) => GIVEN_UP.has(st))) throw new Error('given up');
+        if (Date.now() >= deadline) throw new Error('timeout');
+        await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
+      }
+    } catch {
+      throw new Error(CONNECTORS_NOT_READY);
+    }
   }
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
@@ -500,6 +582,16 @@ async function step(action: string, fn: () => Promise<string>): Promise<StepResu
   } catch (err) {
     return { action, ok: false, message: errorText(err) };
   }
+}
+
+/**
+ * The connectors a clerk run waits for: the clerk's equipped ones (R27) that fit `need`, or all of
+ * them when none fits (oddly named connectors). Empty inventory: nothing to wait for.
+ */
+function readinessTargets(allConnectorPrefixes: string[], need: Need): string[] {
+  const equipped = clerkConnectors(allConnectorPrefixes);
+  const fitting = equipped.filter((p) => NEED_PATTERN[need].test(p));
+  return fitting.length > 0 ? fitting : equipped;
 }
 
 /** claude.ai connectors only, told apart by `source`/`scope` (not by name), in canonical prefix form (R19). */

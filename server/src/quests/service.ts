@@ -59,7 +59,14 @@ export interface QuestServiceDeps {
   sessionStore: SessionStore;
   /** Env for SDK child processes; defaults to `sdkEnv().env` (API-key variables removed). */
   env?: Record<string, string | undefined>;
+  /**
+   * Takes the connector inventory (倉庫盤點) when none is stored yet, so the launch can deny the
+   * connectors the NPC is not equipped with. Wired to the clerk; absent means launches never wait.
+   */
+  ensureInventory?: () => Promise<void>;
 }
+
+export const CLERK_NOT_FOR_QUESTS = '公會櫃檯不接一般委託';
 
 export interface CreateQuestInput {
   title: string;
@@ -74,6 +81,8 @@ interface LaunchParams {
   resume?: string;
   /** Fields set on the quest together with the transition (worktree placement, rejections). */
   patch: Partial<Quest>;
+  /** R26 takeover: drop the previous NPC's session id in the same write, so it can never be resumed. */
+  clearSession?: boolean;
 }
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -143,6 +152,7 @@ export class QuestService {
     try {
       const quest = await this.mustGetQuest(questId);
       const npc = await this.mustGetNpc(npcId);
+      if (npc.builtin) throw new ValidationError(CLERK_NOT_FOR_QUESTS);
       const dungeon = await this.mustGetDungeon(dungeonId);
       if (npc.busyQuestId) throw new NpcBusyError(npc.name);
       transition(quest.status, 'start'); // validate before touching git
@@ -155,6 +165,7 @@ export class QuestService {
           prompt: resume ? CONTINUE_PROMPT : handoverBrief(quest, dungeon),
           ...(resume ? { resume } : {}),
           patch: { dungeonId },
+          clearSession: !resume,
         });
       }
 
@@ -243,7 +254,19 @@ export class QuestService {
 
   /** 驗收 (R4): review -> done with the settlement record, broadcast. */
   accept(questId: string, record: SettlementRecord): Promise<Quest> {
-    return this.patchQuest(questId, (q) => ({ ...q, status: transition(q.status, 'accept'), settlement: record, updatedAt: Date.now() }));
+    return this.patchQuest(questId, (q) => {
+      const next: Quest = { ...q, status: transition(q.status, 'accept'), settlement: record, updatedAt: Date.now() };
+      delete next.lastSettlementAttempt;
+      return next;
+    });
+  }
+
+  /** R35: a settlement whose push / PR failed; the quest stays in review with the attempt recorded, broadcast. */
+  recordSettlementAttempt(questId: string, record: SettlementRecord): Promise<Quest> {
+    return this.patchQuest(questId, (q) => {
+      if (q.status !== 'review') throw new ConflictError('這個委託不在待驗收狀態');
+      return { ...q, lastSettlementAttempt: record, updatedAt: Date.now() };
+    });
   }
 
   /** Startup: nothing runs yet, so every adventuring quest was cut off by a restart. Worktrees are kept. */
@@ -278,7 +301,7 @@ export class QuestService {
     if (!worktreePath || !baseBranch || !branch) throw new ConflictError('這個委託沒有工作目錄');
 
     // Everything that can fail runs before any state is written.
-    const settings = await getSettings(repos);
+    const settings = await this.settingsWithInventory();
     const options = buildAgentOptions({
       npc,
       cwd: worktreePath,
@@ -289,13 +312,11 @@ export class QuestService {
       ...(params.resume ? { resume: params.resume } : {}),
     });
 
-    const started = await this.patchQuest(quest.id, (q) => ({
-      ...q,
-      ...params.patch,
-      status: transition(q.status, params.action),
-      npcId: npc.id,
-      updatedAt: Date.now(),
-    }));
+    const started = await this.patchQuest(quest.id, (q) => {
+      const next: Quest = { ...q, ...params.patch, status: transition(q.status, params.action), npcId: npc.id, updatedAt: Date.now() };
+      if (params.clearSession) delete next.sessionId;
+      return next;
+    });
     await this.patchNpc(npc.id, (n) => ({ ...n, busyQuestId: quest.id }));
 
     const run = AgentRun.start({
@@ -356,14 +377,17 @@ export class QuestService {
     let finished: Quest | undefined;
     try {
       let action: 'finish' | 'interrupt';
-      let scroll: string;
+      let scrollOf: (current: string | undefined) => string;
       if (outcome.ok) {
         action = 'finish';
-        scroll = await this.reviewScroll(quest, outcome.resultText ?? '', place);
+        const review = await this.reviewScroll(quest, outcome.resultText ?? '', place);
+        scrollOf = () => review;
       } else {
         action = 'interrupt';
         const errors = outcome.errors ?? [];
-        scroll = errors.includes(RECALLED) ? RECALLED : `冒險失敗：${errors.join('；') || '未知原因'}`;
+        const line = errors.includes(RECALLED) ? RECALLED : `冒險失敗：${errors.join('；') || '未知原因'}`;
+        // Appended like recoverInterrupted: the earlier report and history stay readable.
+        scrollOf = (current) => appendLine(current, line);
       }
       // Broadcast only after the NPC and the claims are free, so a client reacting to it can start again.
       finished = await this.patchQuest(
@@ -371,7 +395,7 @@ export class QuestService {
         (q) => ({
           ...q,
           status: transition(q.status, action),
-          scroll,
+          scroll: scrollOf(q.scroll),
           ...(outcome.sessionId && !q.sessionId ? { sessionId: outcome.sessionId } : {}),
           updatedAt: Date.now(),
         }),
@@ -389,6 +413,18 @@ export class QuestService {
       this.release(quest.id, npcId);
       if (finished) this.deps.hub.broadcast({ type: 'quest', quest: finished });
     }
+  }
+
+  /** Settings for a launch; takes the connector inventory first when none was ever taken. */
+  private async settingsWithInventory() {
+    const settings = await getSettings(this.deps.repos);
+    if (settings.connectors !== undefined || !this.deps.ensureInventory) return settings;
+    try {
+      await this.deps.ensureInventory();
+    } catch (err) {
+      console.warn(`[倉庫盤點] 出發前盤點失敗，這次不限制 connectors：${errorText(err)}`);
+    }
+    return getSettings(this.deps.repos);
   }
 
   /** Commits leftovers (R24: a failed commit still goes to review, noted in the scroll) and lists the changes. */
