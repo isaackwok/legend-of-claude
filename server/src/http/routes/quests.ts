@@ -1,35 +1,7 @@
-import type { Context } from 'hono';
 import { Hono } from 'hono';
-import { InvalidTransitionError, STATUS_LABEL, type QuestAction, type QuestSource } from '@loc/shared';
-import { BranchExistsError, WorktreePathExistsError } from '../../git/worktree.js';
-import { QuestServiceError, type CreateQuestInput, type QuestService } from '../../quests/service.js';
-
-const ACTION_LABEL: Record<QuestAction, string> = {
-  start: '出發',
-  finish: '完成',
-  interrupt: '中斷',
-  reject: '退回',
-  accept: '驗收',
-  abandon: '放棄',
-};
-
-const BAD_REQUEST = '請求內容不正確';
-
-/** Maps service / state-machine / git errors to `{ error }` with a Chinese message. */
-export function errorResponse(c: Context, err: unknown): Response {
-  if (err instanceof QuestServiceError) return c.json({ error: err.message }, err.status);
-  if (err instanceof InvalidTransitionError) {
-    return c.json({ error: `委託目前是「${STATUS_LABEL[err.from]}」，不能${ACTION_LABEL[err.action]}` }, 409);
-  }
-  if (err instanceof BranchExistsError || err instanceof WorktreePathExistsError) return c.json({ error: err.message }, 409);
-  console.error(err);
-  return c.json({ error: `伺服器發生錯誤：${err instanceof Error ? err.message : String(err)}` }, 500);
-}
-
-async function jsonBody(c: Context): Promise<Record<string, unknown>> {
-  const body: unknown = await c.req.json().catch(() => undefined);
-  return body !== null && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
-}
+import type { QuestSource } from '@loc/shared';
+import type { CreateQuestInput, QuestService } from '../../quests/service.js';
+import { BAD_REQUEST, errorResponse, jsonBody } from './helpers.js';
 
 const isString = (v: unknown): v is string => typeof v === 'string';
 

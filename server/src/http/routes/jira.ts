@@ -1,8 +1,11 @@
 import { Hono } from 'hono';
 import type { ClerkService } from '../../clerk/clerk.js';
-import { clerkErrorResponse, jsonBody } from './settlement.js';
+import { errorResponse, jsonBody } from './helpers.js';
 
-/** POST /api/jira/import `{ key }` -> 201 Quest, or `{ error }` (400 bad/unknown key, 502 clerk failure). */
+/**
+ * POST /api/jira/import `{ key }` -> 201 new Quest, 200 the key's existing live Quest (R28), or `{ error }`
+ * (400 bad/unknown key, 502 clerk failure).
+ */
 export function jiraRoutes(clerk: ClerkService): Hono {
   const app = new Hono();
 
@@ -10,9 +13,10 @@ export function jiraRoutes(clerk: ClerkService): Hono {
     const key = (await jsonBody(c))['key'];
     if (typeof key !== 'string' || !key.trim()) return c.json({ error: '請輸入 Jira 票號' }, 400);
     try {
-      return c.json(await clerk.importJiraIssue(key), 201);
+      const { quest, created } = await clerk.importJiraIssue(key);
+      return c.json(quest, created ? 201 : 200);
     } catch (err) {
-      return clerkErrorResponse(c, err);
+      return errorResponse(c, err);
     }
   });
 

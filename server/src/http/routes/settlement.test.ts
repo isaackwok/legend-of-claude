@@ -67,6 +67,17 @@ describe('POST /api/jira/import', () => {
     expect(await res.json()).toMatchObject({ title: '修好登入', stars: 3, source: { kind: 'jira', key: 'ABC-1' } });
   });
 
+  it('200 with the existing live quest for an already imported key (R28)', async () => {
+    const fake = fakeQuery(structured(issue));
+    const req = appWith(fake.fn);
+    const first = await req('/api/jira/import', { key: 'ABC-1' });
+    expect(first.status).toBe(201);
+    const again = await req('/api/jira/import', { key: 'abc-1' });
+    expect(again.status).toBe(200);
+    expect(((await again.json()) as Quest).id).toBe(((await first.json()) as Quest).id);
+    expect(fake.calls).toHaveLength(1);
+  });
+
   it('400 for a missing or unknown key, 502 when the clerk fails', async () => {
     let req = appWith(fakeQuery(structured({ ...issue, found: false, error: '查無 ABC-9' })).fn);
     expect((await req('/api/jira/import', {})).status).toBe(400);
@@ -127,6 +138,7 @@ describe('settlement routes', () => {
     const req = appWith(fake.fn);
     const open = await jiraQuest('open');
     expect((await req(`/api/quests/${open.id}/settle`, { pushAndPr: 'yes' })).status).toBe(400);
+    expect((await req(`/api/quests/${open.id}/settle`, { pushAndPr: false, linkPr: false, openTicket: false, jiraTransitionId: '31 並刪除' })).status).toBe(400);
     const refused = await req(`/api/quests/${open.id}/settle`, { pushAndPr: false, linkPr: false, openTicket: false });
     expect(refused.status).toBe(409);
     expect(await refused.json()).toEqual({ error: '委託目前是「待接委託」，不能結算' });

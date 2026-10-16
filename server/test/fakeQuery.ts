@@ -21,9 +21,11 @@ export interface FakeQueryOptions {
   interruptReceipt?: { still_queued: string[] };
   /**
    * Successive answers of `mcpServerStatus()` (the last one repeats). A poll may be an `Error` to
-   * reject. Default: always `[]`.
+   * reject, or `'hang'` to never answer. Default: always `[]`.
    */
-  mcpServerStatus?: Array<McpServerStatus[] | Error>;
+  mcpServerStatus?: Array<McpServerStatus[] | Error | 'hang'>;
+  /** `'hang'`: `initializationResult()` never answers. */
+  initializationResult?: 'hang';
 }
 
 export interface FakeQuery {
@@ -110,12 +112,13 @@ export function fakeQuery(script: FakeStep[], fakeOptions: FakeQueryOptions = {}
         state.closed = true;
         notify();
       },
-      initializationResult: async () => ({}),
+      initializationResult: () => (fakeOptions.initializationResult === 'hang' ? new Promise(() => {}) : Promise.resolve({})),
       mcpServerStatus: async () => {
         const answers = fakeOptions.mcpServerStatus ?? [];
         const answer = answers[Math.min(state.statusPolls, answers.length - 1)] ?? [];
         state.statusPolls++;
         if (answer instanceof Error) throw answer;
+        if (answer === 'hang') return new Promise(() => {});
         return answer;
       },
     });

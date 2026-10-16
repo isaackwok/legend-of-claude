@@ -1,24 +1,13 @@
-import type { Context } from 'hono';
 import { Hono } from 'hono';
 import type { SettlementChoices } from '@loc/shared';
-import { ClerkError, type ClerkService } from '../../clerk/clerk.js';
-import { errorResponse } from './quests.js';
-
-export async function jsonBody(c: Context): Promise<Record<string, unknown>> {
-  const body: unknown = await c.req.json().catch(() => undefined);
-  return body !== null && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
-}
-
-/** ClerkError -> its status; everything else as the quest routes map it. */
-export function clerkErrorResponse(c: Context, err: unknown): Response {
-  if (err instanceof ClerkError) return c.json({ error: err.message }, err.status);
-  return errorResponse(c, err);
-}
+import type { ClerkService } from '../../clerk/clerk.js';
+import { errorResponse, jsonBody } from './helpers.js';
 
 function parseChoices(body: Record<string, unknown>): SettlementChoices | undefined {
   const { pushAndPr, linkPr, openTicket, jiraTransitionId, jiraComment } = body;
   if (typeof pushAndPr !== 'boolean' || typeof linkPr !== 'boolean' || typeof openTicket !== 'boolean') return undefined;
-  if (jiraTransitionId !== undefined && typeof jiraTransitionId !== 'string') return undefined;
+  // Jira transition ids are numeric; anything else never reaches the clerk prompt.
+  if (jiraTransitionId !== undefined && (typeof jiraTransitionId !== 'string' || !/^\d*$/.test(jiraTransitionId))) return undefined;
   if (jiraComment !== undefined && typeof jiraComment !== 'string') return undefined;
   const choices: SettlementChoices = { pushAndPr, linkPr, openTicket };
   if (jiraTransitionId) choices.jiraTransitionId = jiraTransitionId;
@@ -34,7 +23,7 @@ export function settlementRoutes(clerk: ClerkService): Hono {
     try {
       return c.json(await clerk.settlementOptions(c.req.param('id')));
     } catch (err) {
-      return clerkErrorResponse(c, err);
+      return errorResponse(c, err);
     }
   });
 
@@ -44,7 +33,7 @@ export function settlementRoutes(clerk: ClerkService): Hono {
     try {
       return c.json(await clerk.settle(c.req.param('id'), choices));
     } catch (err) {
-      return clerkErrorResponse(c, err);
+      return errorResponse(c, err);
     }
   });
 

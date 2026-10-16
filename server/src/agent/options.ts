@@ -45,6 +45,20 @@ export function connectorDenyRule(prefix: string): string {
   return `mcp__${normalizeConnectorPrefix(prefix)}__*`;
 }
 
+/** R29: tools the built-in clerk never gets. */
+export const CLERK_TOOL_DENY = ['Bash'] as const;
+
+const CLERK_CONNECTOR = /atlassian|jira|github/i;
+
+/**
+ * R27: the clerk's connectors — the inventory's Jira/GitHub ones (matched on the prefix, which is the
+ * normalized server name), or every connector when none matches (oddly named connectors still work).
+ */
+export function clerkConnectors(allConnectorPrefixes: string[]): string[] {
+  const matched = allConnectorPrefixes.filter((p) => CLERK_CONNECTOR.test(p));
+  return matched.length > 0 ? matched : allConnectorPrefixes;
+}
+
 export interface BuildAgentOptionsInput {
   npc: Npc;
   cwd: string;
@@ -62,13 +76,16 @@ export interface BuildAgentOptionsInput {
 export function buildAgentOptions(input: BuildAgentOptionsInput): Options {
   const { npc, appendPrompt } = input;
   const readOnly = npc.equipment.readOnly || input.forceReadOnly === true;
-  // The built-in clerk keeps every claude.ai connector (Jira/GitHub paperwork); it stays read-only.
-  const equipped = new Set(npc.equipment.connectorPrefixes.map(normalizeConnectorPrefix));
-  const connectorDenies =
-    npc.builtin === 'clerk'
-      ? []
-      : input.allConnectorPrefixes.filter((p) => !equipped.has(normalizeConnectorPrefix(p))).map(connectorDenyRule);
-  const disallowedTools: string[] = [...GIT_PUSH_DENY, ...(readOnly ? READ_ONLY_DENY : []), ...connectorDenies];
+  const isClerk = npc.builtin === 'clerk';
+  const equipped = new Set((isClerk ? clerkConnectors(input.allConnectorPrefixes) : npc.equipment.connectorPrefixes).map(normalizeConnectorPrefix));
+  const connectorDenies = input.allConnectorPrefixes.filter((p) => !equipped.has(normalizeConnectorPrefix(p))).map(connectorDenyRule);
+  const disallowedTools: string[] = [
+    ...GIT_PUSH_DENY,
+    ...(readOnly ? READ_ONLY_DENY : []),
+    // R29: the clerk never needs a shell; the game does all git work.
+    ...(isClerk ? CLERK_TOOL_DENY : []),
+    ...connectorDenies,
+  ];
   const options: Options = {
     systemPrompt: { type: 'preset', preset: 'claude_code', append: appendPrompt ? `${npc.persona}\n\n${appendPrompt}` : npc.persona },
     model: npc.model,

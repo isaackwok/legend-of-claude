@@ -99,14 +99,32 @@ describe('buildAgentOptions', () => {
     expect(o.disallowedTools).not.toContain('mcp__jira__*');
   });
 
-  it('exempts the builtin clerk from connector denies but keeps read-only and push denies', () => {
-    const all = ['claude_ai_Atlassian', 'claude_ai_GitHub', 'claude_ai_Slack'];
+  it('equips the builtin clerk with Jira/GitHub connectors only, denies Bash, keeps read-only and push denies (R27, R29)', () => {
+    const all = ['claude_ai_Atlassian', 'claude_ai_GitHub', 'claude_ai_Gmail', 'claude_ai_Slack'];
     const clerk = seedNpcs().find((n) => n.builtin === 'clerk')!;
     const c = build({ npc: clerk, allConnectorPrefixes: all });
-    expect(c.disallowedTools?.some((t) => t.startsWith('mcp__'))).toBe(false);
+    const connectorDenies = c.disallowedTools?.filter((t) => t.startsWith('mcp__'));
+    expect(connectorDenies).toEqual(['mcp__claude_ai_Gmail__*', 'mcp__claude_ai_Slack__*']);
+    expect(c.disallowedTools).toContain('Bash');
     expect(c.disallowedTools).toEqual(expect.arrayContaining([...READ_ONLY_DENY, ...GIT_PUSH_DENY]));
     const other = build({ allConnectorPrefixes: all });
     expect(other.disallowedTools).toEqual(expect.arrayContaining(all.map((p) => `mcp__${p}__*`)));
+    expect(other.disallowedTools).not.toContain('Bash');
+  });
+
+  it('keeps every connector for the clerk when none looks like Jira or GitHub', () => {
+    const clerk = seedNpcs().find((n) => n.builtin === 'clerk')!;
+    const c = build({ npc: clerk, allConnectorPrefixes: ['claude_ai_Gmail', 'claude_ai_Slack'] });
+    expect(c.disallowedTools?.some((t) => t.startsWith('mcp__'))).toBe(false);
+    expect(c.disallowedTools).toContain('Bash');
+    const none = build({ npc: clerk, allConnectorPrefixes: [] });
+    expect(none.disallowedTools?.some((t) => t.startsWith('mcp__'))).toBe(false);
+  });
+
+  it('matches a jira-named connector for the clerk', () => {
+    const clerk = seedNpcs().find((n) => n.builtin === 'clerk')!;
+    const c = build({ npc: clerk, allConnectorPrefixes: ['my-jira', 'mcp__claude_ai_Slack__'] });
+    expect(c.disallowedTools?.filter((t) => t.startsWith('mcp__'))).toEqual(['mcp__claude_ai_Slack__*']);
   });
 
   it('passes the given env through unchanged (no API key from sdkEnv)', () => {
