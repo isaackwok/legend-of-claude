@@ -217,7 +217,7 @@ export class AgentRun {
   private async run(): Promise<RunOutcome> {
     let outcome: RunOutcome | undefined;
     // A result with queued sends means another turn is under way; until its own result arrives the
-    // earlier outcome is provisional, so a recall in between must win over it.
+    // earlier outcome is provisional: recall, a crash or a missing follow-up result must win over it.
     let turnPending = false;
     let thrown: string | undefined;
     let costUsd = 0;
@@ -264,7 +264,7 @@ export class AgentRun {
       this.emitError(this.prepError);
       return { ok: false, errors: [this.prepError], sessionId: this.sessionId, costUsd };
     }
-    if (outcome) return outcome;
+    if (outcome && !turnPending) return outcome;
     const detail = thrown ?? '冒險在沒有回報的情況下結束';
     this.emitError(detail);
     return { ok: false, errors: [detail], sessionId: this.sessionId, costUsd };

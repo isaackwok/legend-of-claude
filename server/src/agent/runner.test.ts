@@ -136,6 +136,36 @@ describe('AgentRun', () => {
     expect(await run.done).toMatchObject({ ok: true, resultText: '第二輪' });
   });
 
+  it('reports failure when a queued follow-up ends without its own result', async () => {
+    const { events, run } = start([init, { ...success, queued_turn_count: 1 }]);
+    expect(await run.done).toEqual({
+      ok: false,
+      errors: ['冒險在沒有回報的情況下結束'],
+      sessionId: 's-1',
+      costUsd: 0.25,
+    });
+    expect(events.at(-1)).toMatchObject({ kind: 'error', detail: '冒險在沒有回報的情況下結束' });
+  });
+
+  it('reports the SDK error when a queued follow-up crashes before its result', async () => {
+    const fake = fakeQuery([init, { ...success, queued_turn_count: 1 }]);
+    const throwing = ((params: Parameters<typeof fake.fn>[0]) => {
+      const inner = fake.fn(params);
+      return (async function* () {
+        yield* inner;
+        throw new Error('worker disconnected during follow-up');
+      })();
+    }) as unknown as typeof fake.fn;
+    const { events, run } = start([], { queryFn: throwing });
+    expect(await run.done).toEqual({
+      ok: false,
+      errors: ['worker disconnected during follow-up'],
+      sessionId: 's-1',
+      costUsd: 0.25,
+    });
+    expect(events.at(-1)).toMatchObject({ kind: 'error', detail: 'worker disconnected during follow-up' });
+  });
+
   it('denies a permission check with a not-started message when the run ends without init', async () => {
     const { fake, run } = start([{ canUseTool: { toolName: 'Bash', input: { command: 'ls' }, detach: true } }]);
     expect((await run.done).ok).toBe(false);
