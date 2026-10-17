@@ -226,6 +226,54 @@ describe('CrystalBall', () => {
     expect(screen.getByText('已編輯')).toBeTruthy();
   });
 
+  it('renders adventurer markdown (history, live text, result) as styled HTML, but keeps 會長 text raw', async () => {
+    history['s-quest'] = [
+      { role: 'user', blocks: [{ type: 'text', text: '請用 **粗體** 回覆' }] },
+      { role: 'assistant', blocks: [{ type: 'text', text: '## 計畫\n\n- 第一步 **重現**\n- 第二步 `npm test`\n\n| 欄 | 值 |\n|---|---|\n| a | 1 |' }] },
+    ];
+    useGame.setState({
+      quests: { q1: quest('adventuring') },
+      ui: { panel: 'crystal', crystalSessionId: 's-quest' },
+      events: {
+        's-quest': [
+          ev({ kind: 'text', label: 'x', detail: '看 [文件](https://example.com) 與 *斜體*\n\n```ts\nconst a = 1;\n```' }),
+          ev({ kind: 'result', label: '冒險回報', detail: '# 卷軸\n\n1. 修好了' }),
+        ],
+      },
+    });
+    mockFetch();
+    render(<CrystalBall />);
+    const log = await screen.findByLabelText('冒險日誌');
+    expect((await within(log).findByRole('heading', { name: '計畫' })).tagName).toBe('H2');
+    expect(within(log).getByText('重現').tagName).toBe('STRONG');
+    expect(within(log).getByText('npm test').tagName).toBe('CODE');
+    expect(within(log).getByRole('table')).toBeTruthy();
+    const link = within(log).getByRole('link', { name: '文件' });
+    expect(link.getAttribute('href')).toBe('https://example.com');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+    expect(within(log).getByText('斜體').tagName).toBe('EM');
+    expect(within(log).getByText('const a = 1;').closest('pre')).toBeTruthy();
+    expect(within(log).getByRole('heading', { name: '卷軸' }).tagName).toBe('H1');
+    expect(within(log).getByText('修好了').tagName).toBe('LI');
+    expect(within(log).getByText(/請用 \*\*粗體\*\* 回覆/)).toBeTruthy();
+    expect(within(log).queryByText('**')).toBeNull();
+  });
+
+  it('does not render raw HTML or javascript: links from adventurer markdown', async () => {
+    history['s-quest'] = [
+      { role: 'assistant', blocks: [{ type: 'text', text: '<img src=x onerror="alert(1)"><b>粗</b> [點我](javascript:alert(1))' }] },
+    ];
+    useGame.setState({ quests: { q1: quest('adventuring') }, ui: { panel: 'crystal', crystalSessionId: 's-quest' } });
+    mockFetch();
+    render(<CrystalBall />);
+    const log = await screen.findByLabelText('冒險日誌');
+    await within(log).findByText(/點我/);
+    expect(log.querySelector('img')).toBeNull();
+    expect(log.querySelector('b')).toBeNull();
+    expect(log.querySelector('a[href^="javascript"]')).toBeNull();
+  });
+
   it('refreshes the session list when an event for an unknown session arrives', async () => {
     const fetchFn = mockFetch();
     render(<CrystalBall />);

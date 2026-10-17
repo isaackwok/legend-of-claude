@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { GameEvent, TranscriptMessage } from '@loc/shared';
 import { api } from '../../api/http';
 import { useGame } from '../../state/store';
@@ -17,6 +19,22 @@ function prettyJson(value: unknown): string {
     return '（無法顯示）';
   }
 }
+
+const REMARK_PLUGINS = [remarkGfm];
+const MD_COMPONENTS: Components = {
+  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+};
+
+/** Adventurer output is markdown. Raw HTML is not rendered and unsafe URLs are dropped (react-markdown defaults). */
+const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }) {
+  return (
+    <div className={className ? `md ${className}` : 'md'}>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MD_COMPONENTS}>
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+});
 
 function DiffLines({ oldText, newText }: { oldText: string; newText: string }) {
   const lines = [
@@ -142,14 +160,14 @@ export function buildLiveItems(events: GameEvent[]): LiveItem[] {
 function LiveItemView({ item }: { item: LiveItem }) {
   switch (item.kind) {
     case 'text':
-      return <p className={`msg msg-assistant${item.nested ? ' tool-nested' : ''}`}>{item.text}</p>;
+      return <Markdown className={`msg msg-assistant${item.nested ? ' tool-nested' : ''}`} text={item.text} />;
     case 'compact':
       return <div className="divider">正在整理筆記</div>;
     case 'result':
       return (
         <div className="msg msg-result">
           <strong>{item.label}</strong>
-          {item.text && <p>{item.text}</p>}
+          {item.text && <Markdown text={item.text} />}
         </div>
       );
     case 'error':
@@ -190,6 +208,7 @@ function HistoryView({ messages }: { messages: TranscriptMessage[] }) {
         m.blocks.map((b, bi) => {
           const key = `${mi}-${bi}`;
           if (b.type === 'text') {
+            if (m.role === 'assistant') return <Markdown key={key} className="msg msg-assistant" text={b.text} />;
             return (
               <p key={key} className={`msg ${m.role === 'user' ? 'msg-user' : 'msg-assistant'}`}>
                 {m.role === 'user' && <strong>會長：</strong>}
